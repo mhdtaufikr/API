@@ -7,7 +7,8 @@ if not exist "%~dp0bin\run-talenta.ps1" (
 )
 if "%~1"=="" goto run
 if /I "%~1"=="--preview" goto preview
-echo Usage: kirimkeTalenta.bat [--preview]
+if /I "%~1"=="--manual" goto manual
+echo Usage: kirimkeTalenta.bat [--preview^|--manual]
 exit /b 64
 
 :run
@@ -16,4 +17,8 @@ exit /b %ERRORLEVEL%
 
 :preview
 powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0bin\run-talenta.ps1" -Preview
+exit /b %ERRORLEVEL%
+
+:manual
+powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0bin\run-talenta.ps1" -Manual
 exit /b %ERRORLEVEL%

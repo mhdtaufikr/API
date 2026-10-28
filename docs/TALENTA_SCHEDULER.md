@@ -34,6 +34,8 @@ The reviewed Attendance MKM contract is packaged without credentials so a clean 
 
 Scheduled legacy batches skip only identities that Talenta confirms are unusable for fingerprint import, such as a missing/mismatched barcode, invalid user ID or a non-unique employee result. Skipped source rows remain `FlFlag=0`, are excluded from the CSV and are counted in `events_skipped`/`cards_skipped`; valid employees in the same day continue independently. Transport failures, credential errors, profile errors, ambiguous source tuples and unknown outcomes still hold the batch. Manual sending remains strict and does not skip an invalid selected identity.
 
+`kirimkeTalenta.bat --manual` explicitly runs the same legacy scheduler pipeline outside the 08:00/12:00/18:00 windows. It does not weaken the enabled/live-write/credential/profile gates, preview revalidation, identity skips, ledger protection or exact post-acceptance flag update. The no-argument BAT remains schedule-window-only; `--preview` remains read-only.
+
 No new database migration is needed; scheduled batches use the existing integration queue. The new status panel on the dashboard shows the three WIB slots and whether automatic submission is enabled.
 
 ## Review and activation

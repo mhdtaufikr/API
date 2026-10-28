@@ -1,5 +1,6 @@
-param([switch]$Preview)
+param([switch]$Preview, [switch]$Manual)
 $ErrorActionPreference = 'Stop'
+if ($Preview -and $Manual) { throw 'Choose Preview or Manual, not both.' }
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $console = Join-Path $projectRoot 'bin\console.php'
 $log = Join-Path $projectRoot 'storage\scheduler-console.log'
@@ -20,12 +21,13 @@ try {
     if (-not $php) { throw 'PHP 7.4+ was not found. Configure MKM_TALENTA_PHP_EXE with a supported php.exe path.' }
     if (-not (Test-Path -LiteralPath (Join-Path $projectRoot 'storage') -PathType Container)) { throw 'Missing writable storage directory.' }
     $stamp = [DateTimeOffset]::Now.ToString('o')
-    $mode = if ($Preview) { 'preview' } else { 'scheduled' }
+    $mode = if ($Preview) { 'preview' } elseif ($Manual) { 'manual' } else { 'scheduled' }
     Add-Content -LiteralPath $log -Value "[$stamp] kirimkeTalenta.bat mode=$mode php=$php" -Encoding UTF8
     Push-Location -LiteralPath $projectRoot
     try {
         $phpArgs = @($console, 'talenta:scheduler')
         if ($Preview) { $phpArgs += '--preview' }
+        if ($Manual) { $phpArgs += '--manual' }
         # Preserve native stderr/output and the actual process exit code under Windows PowerShell.
         $ErrorActionPreference = 'Continue'
         & $php @phpArgs 2>&1 | ForEach-Object {

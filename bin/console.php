@@ -23,8 +23,8 @@ try {
     }
     if ($command === 'talenta:scheduler') {
         $options = array_slice($argv, 2);
-        if (array_diff($options, ['--preview'])) {
-            compat_throw(new InvalidArgumentException('Use talenta:scheduler [--preview].'));
+        if (array_diff($options, ['--preview', '--manual']) || count($options) !== count(array_unique($options)) || in_array('--preview', $options, true) && in_array('--manual', $options, true)) {
+            compat_throw(new InvalidArgumentException('Use talenta:scheduler [--preview|--manual].'));
         }
         if (LegacyAttendanceRepository::active() && env('INTEGRATION_STORAGE') !== 'legacy_app') {
             compat_throw(new RuntimeException('Talenta scheduler is unavailable in read-only/local legacy modes.'));
@@ -32,7 +32,14 @@ try {
         $scheduler = env('INTEGRATION_STORAGE') === 'legacy_app'
             ? new LegacyTalentaScheduledExport()
             : new TalentaScheduledExport();
-        $result = $scheduler->run(in_array('--preview', $options, true));
+        $preview = in_array('--preview', $options, true);
+        $manual = in_array('--manual', $options, true);
+        if ($manual && !($scheduler instanceof LegacyTalentaScheduledExport)) {
+            compat_throw(new RuntimeException('Manual anytime mode is available only for INTEGRATION_STORAGE=legacy_app.'));
+        }
+        $result = $scheduler instanceof LegacyTalentaScheduledExport
+            ? $scheduler->run($preview, null, $manual)
+            : $scheduler->run($preview);
         echo json_encode($result, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL;
         exit($result['errors'] ? 1 : 0);
     }

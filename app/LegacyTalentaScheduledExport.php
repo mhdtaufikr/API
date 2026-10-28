@@ -28,7 +28,7 @@ final class LegacyTalentaScheduledExport
         };
     }
 
-    public function run(bool $preview = false, ?DateTimeImmutable $now = null): array
+    public function run(bool $preview = false, ?DateTimeImmutable $now = null, bool $manual = false): array
     {
         if (env('INTEGRATION_STORAGE') !== 'legacy_app') {
             compat_throw(new RuntimeException('Legacy scheduler requires INTEGRATION_STORAGE=legacy_app.'));
@@ -45,6 +45,7 @@ final class LegacyTalentaScheduledExport
         $summary = [
             'mode' => 'legacy_app',
             'preview' => $preview,
+            'trigger' => $preview ? 'preview' : ($manual ? 'manual' : 'scheduled'),
             'timezone' => 'Asia/Jakarta',
             'schedule' => TalentaScheduledExport::TIMES,
             'slot' => $slot,
@@ -61,7 +62,7 @@ final class LegacyTalentaScheduledExport
         if (!$preview && !enabled('TALENTA_SCHEDULER_ENABLED')) {
             return $this->finish($summary, ['status' => 'disabled', 'reason' => 'Scheduler disabled']);
         }
-        if (!$preview && $slot === null) {
+        if (!$preview && !$manual && $slot === null) {
             return $this->finish($summary, ['status' => 'outside_schedule']);
         }
 

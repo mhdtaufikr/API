@@ -53,10 +53,13 @@ $previewedDates = [];
 $outside = $scheduler->run(false, new DateTimeImmutable('2026-10-28T12:27:00+07:00'));
 legacySchedulerCheck($outside['status'] === 'outside_schedule' && $sent === 0, 'Live scheduler refuses an out-of-window manual run');
 
+$manual = $scheduler->run(false, new DateTimeImmutable('2026-10-28T12:27:00+07:00'), true);
+legacySchedulerCheck($manual['status'] === 'completed' && $manual['trigger'] === 'manual' && $manual['slot'] === null && $sent === 1, 'Explicit manual mode sends outside a schedule window through the same guarded pipeline');
+
 $previewedDates = [];
 $completed = $scheduler->run(false, new DateTimeImmutable('2026-10-28T18:00:00+07:00'));
-legacySchedulerCheck($completed['status'] === 'completed' && $completed['batches_submitted'] === 1 && $completed['flags_updated'] === 1 && $sent === 1, 'Scheduled acceptance updates the exact legacy flag batch');
-legacySchedulerCheck(count($logs) === 2 && $logs[1]['ledger_ids'] === ['TEST-LEDGER'], 'Non-preview scheduler outcomes are audited without raw attendance payloads');
+legacySchedulerCheck($completed['status'] === 'completed' && $completed['batches_submitted'] === 1 && $completed['flags_updated'] === 1 && $sent === 2, 'Scheduled acceptance updates the exact legacy flag batch');
+legacySchedulerCheck(count($logs) === 3 && $logs[2]['ledger_ids'] === ['TEST-LEDGER'], 'Non-preview scheduler outcomes are audited without raw attendance payloads');
 
 $skippedPlan = $plan;
 $skippedPlan['skipped'] = [['card' => '2131', 'rows' => 2, 'reason' => 'Barcode empty']];
