@@ -4,6 +4,7 @@ declare (strict_types=1);
 final class MachineRequestParser
 {
     public const PROFILE = 'observed-v1';
+    public const GET_TIME_TOLERANCE_SECONDS = 60;
     public function parse(array $input): array
     {
         if (array_diff(array_keys($input), ['cardno', 'd', 'h', 'm'])) {
@@ -30,8 +31,16 @@ final class MachineRequestParser
         if (!preg_match('/\A[0-9]{4}\/[0-9]{2}\/[0-9]{2}\z/D', $input['d']) || $input['d'] !== $time->format('Y/m/d')) {
             compat_throw(new InvalidArgumentException('GET date does not match embedded date.'));
         }
-        if (!preg_match('/\A[0-9]{2}:[0-9]{2}\z/D', $input['h']) || $input['h'] !== $time->format('H:i')) {
-            compat_throw(new InvalidArgumentException('GET time does not match embedded hour and minute.'));
+        if (!preg_match('/\A[0-9]{2}:[0-9]{2}\z/D', $input['h'])) {
+            compat_throw(new InvalidArgumentException('Invalid GET time.'));
+        }
+        $getTime = DateTimeImmutable::createFromFormat('!Y/m/d H:i', $input['d'] . ' ' . $input['h'], $zone);
+        if (
+            !$getTime ||
+            compat_datetime_errors() ||
+            abs($getTime->getTimestamp() - $time->getTimestamp()) > self::GET_TIME_TOLERANCE_SECONDS
+        ) {
+            compat_throw(new InvalidArgumentException('GET time is outside the observed one-minute embedded-time tolerance.'));
         }
         if ($time > new DateTimeImmutable('+5 minutes', $zone)) {
             compat_throw(new InvalidArgumentException('Future transaction exceeds the five minute clock tolerance.'));

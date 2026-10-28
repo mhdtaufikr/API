@@ -96,10 +96,9 @@ final class LegacyAttendanceRepository implements ReceiverEventStore
             && is_string($trialDirection)
             && preg_match('/\A[0-9]\z/', $trialDirection) === 1;
     }
-    /** Production physical writes require an exact IP allowlist and verified direction map. */
+    /** Production physical writes require the explicit gate, transport allowlist and verified direction map. */
     public static function allowsProductionPhysicalReceiver(array $event, string $sourceIp, ?string $trialDirection): bool
     {
-        $allowed = array_map('trim', explode(',', env('MACHINE_ALLOWED_IPS', '')));
         $map = json_decode(env('LEGACY_DIRECTION_MAP', '{}'), true);
         $direction = is_array($map) ? ($map[$event['direction_code'] ?? ''] ?? null) : null;
         return env('DB_DATABASE') === 'mkm_ssmdb'
@@ -107,8 +106,7 @@ final class LegacyAttendanceRepository implements ReceiverEventStore
             && enabled('LEGACY_PRODUCTION_PHYSICAL_RECEIVER_CONFIRMED')
             && enabled('MACHINE_RECEIVER_ENABLED')
             && $trialDirection === null
-            && !in_array('*', $allowed, true)
-            && in_array($sourceIp, $allowed, true)
+            && ReceiverHttp::sourceAllowed($sourceIp)
             && is_string($direction)
             && preg_match('/\A[0-9]\z/', $direction) === 1;
     }
@@ -215,7 +213,8 @@ final class LegacyAttendanceRepository implements ReceiverEventStore
             $s = $this->pdo->prepare('SELECT COUNT(*) FROM ' . $this->table() . ' WHERE ' . implode(' AND ', $where));
             $s->execute(array_diff_key($row, ['FlFlag' => true]));
             if ((int) $s->fetchColumn() > 0) {
-                compat_throw(new RuntimeException('Identical legacy tuple exists: retransmission versus separate physical tap is ambiguous. No insert/overwrite; review required.'));
+                $this->pdo->commit();
+                return ['id' => null, 'duplicate' => true, 'value_group_hash' => self::fingerprint($row)];
             }
             $fields = implode(',', array_map($q, self::FIELDS));
             $holders = implode(',', array_map(fn($f) => ':' . $f, self::FIELDS));

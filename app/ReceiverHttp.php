@@ -4,6 +4,12 @@ declare(strict_types=1);
 
 final class ReceiverHttp
 {
+    private const DEFAULT_RESPONSE_CONTRACT = [
+        'success' => 'OK',
+        'duplicate' => 'OK',
+        'failure' => 'ERROR',
+    ];
+
     /**
      * Operator access is not restricted by source IP.
      *
@@ -28,17 +34,9 @@ final class ReceiverHttp
         }
 
         // Support wildcard (*) to allow requests from all IPs.
-        $allowed = array_map(
-            'trim',
-            explode(',', env('MACHINE_ALLOWED_IPS', '127.0.0.1,::1'))
-        );
-
         $remoteIp = $server['REMOTE_ADDR'] ?? '';
 
-        if (
-            !in_array('*', $allowed, true) &&
-            !in_array($remoteIp, $allowed, true)
-        ) {
+        if (!self::sourceAllowed($remoteIp)) {
             compat_throw(
                 new DomainException('Source IP is not allowed.', 403)
             );
@@ -109,42 +107,61 @@ final class ReceiverHttp
         }
     }
 
+    public static function sourceAllowed(string $remoteIp, ?string $configured = null): bool
+    {
+        if ($remoteIp === '') {
+            return false;
+        }
+
+        $allowed = array_map(
+            'trim',
+            explode(',', $configured ?? env('MACHINE_ALLOWED_IPS', '127.0.0.1,::1'))
+        );
+
+        return in_array('*', $allowed, true) || in_array($remoteIp, $allowed, true);
+    }
+
+    public static function responseContract(?string $path = null): array
+    {
+        $contract = self::DEFAULT_RESPONSE_CONTRACT;
+        $path = $path ?? ROOT . '/config/receiver-response.json';
+
+        if (!is_file($path)) {
+            return $contract;
+        }
+
+        $custom = jsonFile($path);
+
+        foreach ($contract as $key => $value) {
+            if (
+                !isset($custom[$key]) ||
+                !is_string($custom[$key]) ||
+                strlen($custom[$key]) > 4096
+            ) {
+                compat_throw(new RuntimeException('Invalid response contract.'));
+            }
+
+            $contract[$key] = $custom[$key];
+        }
+
+        return $contract;
+    }
+
     /**
      * Return receiver response to attendance machine.
      */
     public static function respond(
         int $http,
         string $status,
-        string $requestId
+        string $requestId,
+        ?array $validatedContract = null
     ): void {
-        $contract = [
-            'success'   => 'OK',
-            'duplicate' => 'OK',
-            'failure'   => 'ERROR'
-        ];
-
-        $path = ROOT . '/config/receiver-response.json';
-
-        if (is_file($path)) {
+        $contract = $validatedContract;
+        if ($contract === null) {
             try {
-                $custom = jsonFile($path);
-
-                foreach ($contract as $key => $value) {
-                    if (
-                        !isset($custom[$key]) ||
-                        !is_string($custom[$key]) ||
-                        strlen($custom[$key]) > 4096
-                    ) {
-                        compat_throw(
-                            new RuntimeException(
-                                'Invalid response contract.'
-                            )
-                        );
-                    }
-
-                    $contract[$key] = $custom[$key];
-                }
+                $contract = self::responseContract();
             } catch (Throwable $_ignored) {
+                $contract = self::DEFAULT_RESPONSE_CONTRACT;
                 $http = 503;
                 $status = 'error';
             }

@@ -6,8 +6,11 @@ require __DIR__ . '/../../app/bootstrap.php';
 set_time_limit(12);
 $requestId = bin2hex(random_bytes(12));
 $audit = new ReceiverAudit();
+$responseContract = null;
 try {
     ReceiverHttp::validateTransport($_SERVER, $_GET);
+    // Validate the acknowledgment contract before any durable database write.
+    $responseContract = ReceiverHttp::responseContract();
     if (PHP_VERSION_ID < 70400) {
         compat_throw(new DomainException('Receiver requires PHP 7.4+. Active runtime: ' . PHP_VERSION . '.', 503));
     }
@@ -16,7 +19,7 @@ try {
     if ($result['http'] === 200 && $result['status'] === 'stored' && LegacyAttendanceRepository::active()) {
         HrmsSdfExport::onReceive($requestId, $_SERVER['REMOTE_ADDR']);
     }
-    ReceiverHttp::respond($result['http'], $result['status'], $requestId);
+    ReceiverHttp::respond($result['http'], $result['status'], $requestId, $responseContract);
 } catch (Throwable $error) {
     $http = $error instanceof DomainException ? $error->getCode() : 503;
     $safe = [];
@@ -28,5 +31,5 @@ try {
     } catch (Throwable $_ignored) {
         error_log('Machine receiver audit unavailable; request ' . $requestId);
     }
-    ReceiverHttp::respond($http, $http < 500 ? 'rejected' : 'error', $requestId);
+    ReceiverHttp::respond($http, $http < 500 ? 'rejected' : 'error', $requestId, $responseContract);
 }

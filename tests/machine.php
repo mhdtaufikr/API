@@ -30,17 +30,24 @@ verify($parsed['raw_message'] === $sample['cardno'], 'Original raw message prese
 $lowercase = $sample;
 $lowercase['cardno'] = str_replace('0002T', '0002t', $sample['cardno']);
 verify($parser->parse($lowercase)['card_number'] === '2120', 'Actual lowercase 0002t terminal literal accepted');
+$terminal004 = ['cardno' => '0040002t21202026102809405810', 'd' => '2026/10/28', 'h' => '09:41', 'm' => '004'];
+$terminal003 = ['cardno' => '0030002t21202026102809413110', 'd' => '2026/10/28', 'h' => '09:41', 'm' => '003'];
+verify($parser->parse($terminal004)['event_datetime'] === '2026-10-28T09:40:58+07:00', 'Captured terminal 004 minute-boundary payload accepted without changing embedded seconds');
+verify($parser->parse($terminal003)['event_datetime'] === '2026-10-28T09:41:31+07:00', 'Captured terminal 003 payload accepted');
 $alternate = $sample;
 $alternate['cardno'] = '005' . substr($sample['cardno'], 3);
 $alternate['m'] = '005';
 verify($parser->parse($alternate)['terminal_id'] === '005', 'Different terminal decoded without inventing new fields');
-foreach ([['d' => '2026/10/24'], ['h' => '09:41'], ['m' => '999'], ['cardno' => 'broken'], ['cardno' => '0040002T21202026023009403610'], ['cardno' => '0040003T21202026102509403610'], ['cardno' => ['x']], ['extra' => 'x']] as $i => $change) {
+foreach ([['d' => '2026/10/24'], ['h' => '09:42'], ['m' => '999'], ['cardno' => 'broken'], ['cardno' => '0040002T21202026023009403610'], ['cardno' => '0040003T21202026102509403610'], ['cardno' => ['x']], ['extra' => 'x']] as $i => $change) {
     refuses(fn() => $parser->parse(array_replace($sample, $change)), 'Invalid/mismatched sample rejected #' . ($i + 1));
 }
 refuses(fn() => $parser->parse(['cardno' => $sample['cardno']]), 'Missing GET fields rejected');
 $server = ['REQUEST_METHOD' => 'GET', 'REMOTE_ADDR' => '127.0.0.1', 'QUERY_STRING' => http_build_query($sample)];
 ReceiverHttp::validateTransport($server, $sample);
 verify(true, 'Allowed GET transport');
+verify(ReceiverHttp::sourceAllowed('172.17.211.245', '*'), 'Explicit wildcard accepts a physical terminal source IP');
+verify(!ReceiverHttp::sourceAllowed('172.17.211.245', '127.0.0.1,::1'), 'Physical source remains blocked without wildcard or an exact address');
+verify(ReceiverHttp::responseContract() === ['success' => 'OK', 'duplicate' => 'OK', 'failure' => 'ERROR'], 'Default acknowledgment contract remains exact and has no added newline');
 refuses(fn() => ReceiverHttp::validateTransport(array_replace($server, ['REMOTE_ADDR' => '198.51.100.1', 'HTTP_X_FORWARDED_FOR' => '127.0.0.1']), $sample), 'Forwarded header cannot bypass source IP allowlist');
 refuses(fn() => ReceiverHttp::validateTransport(array_replace($server, ['REQUEST_METHOD' => 'POST']), $sample), 'Undefined POST ingestion rejected');
 refuses(fn() => ReceiverHttp::validateTransport(array_replace($server, ['QUERY_STRING' => str_repeat('x', 1025)]), $sample), 'Query size bounded');

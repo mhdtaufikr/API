@@ -59,16 +59,12 @@ $repo = new LegacyAttendanceRepository($pdo);
 legacyCheck(count($repo->inspect()) === 6, 'Exact six legacy column names discovered');
 $payload = ['cardno' => '0040002T21202026102509403610', 'd' => '2026/10/25', 'h' => '09:40', 'm' => '004'];
 $event = (new MachineRequestParser())->parse($payload);
-$repo->store($event, $payload, '127.0.0.1');
+$firstStore = $repo->store($event, $payload, '127.0.0.1');
 $rows = $repo->rows('2026-10-25', '2026-10-25', '2120');
 legacyCheck(count($rows) === 1 && $rows[0]['FcTime'] === '09:40:36' && (int) $rows[0]['FlFlag'] === 0, 'Local receiver inserts tbl_rawdata with original seconds and flag zero');
 legacyCheck(LegacyAttendanceRepository::timestamp($rows[0]) === '2026-10-25T09:40:36+07:00', 'Legacy wall clock interpreted in Jakarta without send-time replacement');
-try {
-    $repo->store($event, $payload, '127.0.0.1');
-    compat_throw(new LogicException('Repeat accepted'));
-} catch (RuntimeException $e) {
-    legacyCheck(!$e instanceof LogicException, 'Identical tuple replay held as ambiguous without second insertion');
-}
+$repeatStore = $repo->store($event, $payload, '127.0.0.1');
+legacyCheck(!$firstStore['duplicate'] && $repeatStore['duplicate'] && count($repo->rows('2026-10-25', '2026-10-25', '2120')) === 1, 'Identical tuple replay is acknowledged as an already-persisted duplicate without a second insertion');
 $other = $payload;
 $other['cardno'] = '005' . substr($payload['cardno'], 3);
 $other['m'] = '005';
