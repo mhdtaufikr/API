@@ -32,6 +32,8 @@ When `INTEGRATION_STORAGE=legacy_app`, the same `talenta:scheduler` command now 
 
 The reviewed Attendance MKM contract is packaged without credentials so a clean Git deployment can pass the contract gate. A deployment may still provide the older private `config/contract.json` plus matching `storage/postman.json`; both runtime files must exist together and retain their reviewed hash. Partial or changed runtime evidence remains blocked.
 
+Scheduled legacy batches skip only identities that Talenta confirms are unusable for fingerprint import, such as a missing/mismatched barcode, invalid user ID or a non-unique employee result. Skipped source rows remain `FlFlag=0`, are excluded from the CSV and are counted in `events_skipped`/`cards_skipped`; valid employees in the same day continue independently. Transport failures, credential errors, profile errors, ambiguous source tuples and unknown outcomes still hold the batch. Manual sending remains strict and does not skip an invalid selected identity.
+
 No new database migration is needed; scheduled batches use the existing integration queue. The new status panel on the dashboard shows the three WIB slots and whether automatic submission is enabled.
 
 ## Review and activation

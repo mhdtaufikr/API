@@ -23,7 +23,7 @@ $rows = [
 $events = [
     ['nik' => '2120', 'timestamp' => '2026-10-28T07:30:00+07:00'],
 ];
-$plan = ['rows' => $rows, 'events' => $events, 'issues' => [], 'hash' => hash('sha256', 'plan')];
+$plan = ['rows' => $rows, 'events' => $events, 'issues' => [], 'skipped' => [], 'hash' => hash('sha256', 'plan')];
 $sent = 0;
 $logs = [];
 $previewedDates = [];
@@ -57,6 +57,31 @@ $previewedDates = [];
 $completed = $scheduler->run(false, new DateTimeImmutable('2026-10-28T18:00:00+07:00'));
 legacySchedulerCheck($completed['status'] === 'completed' && $completed['batches_submitted'] === 1 && $completed['flags_updated'] === 1 && $sent === 1, 'Scheduled acceptance updates the exact legacy flag batch');
 legacySchedulerCheck(count($logs) === 2 && $logs[1]['ledger_ids'] === ['TEST-LEDGER'], 'Non-preview scheduler outcomes are audited without raw attendance payloads');
+
+$skippedPlan = $plan;
+$skippedPlan['skipped'] = [['card' => '2131', 'rows' => 2, 'reason' => 'Barcode empty']];
+$skippedScheduler = new LegacyTalentaScheduledExport(
+    static function (array $scope) use ($skippedPlan): array {
+        if ($scope[0] !== '2026-10-28') throw new NoPendingLegacyAttendanceException('none');
+        return $skippedPlan;
+    },
+    static fn(array $scope, string $hash): array => ['status' => 'submitted_pending_reconciliation', 'flag_updated' => true, 'http' => 202, 'id' => 'SKIP-LEDGER'],
+    static function (array $summary): void {}
+);
+$skippedResult = $skippedScheduler->run(false, new DateTimeImmutable('2026-10-28T18:00:00+07:00'));
+legacySchedulerCheck($skippedResult['status'] === 'completed_with_skips' && $skippedResult['events_skipped'] === 2 && $skippedResult['cards_skipped'] === 1 && $skippedResult['flags_updated'] === 1, 'Invalid identity rows stay skipped while valid rows are submitted and flagged');
+
+$skipOnlyPlan = ['rows' => [], 'events' => [], 'issues' => [], 'skipped' => [['card' => '2131', 'rows' => 3, 'reason' => 'Barcode empty']], 'hash' => 'skip-only'];
+$skipOnlyScheduler = new LegacyTalentaScheduledExport(
+    static function (array $scope) use ($skipOnlyPlan): array {
+        if ($scope[0] !== '2026-10-28') throw new NoPendingLegacyAttendanceException('none');
+        return $skipOnlyPlan;
+    },
+    static function (): array { throw new LogicException('Skipped-only batch must not send.'); },
+    static function (array $summary): void {}
+);
+$skipOnlyResult = $skipOnlyScheduler->run(false, new DateTimeImmutable('2026-10-28T18:00:00+07:00'));
+legacySchedulerCheck($skipOnlyResult['status'] === 'completed_with_skips' && $skipOnlyResult['batches_submitted'] === 0 && $skipOnlyResult['events_skipped'] === 3 && $skipOnlyResult['flags_updated'] === 0 && $skipOnlyResult['errors'] === 0, 'A skipped-only day is a safe no-send outcome and leaves every flag unchanged');
 
 $held = new LegacyTalentaScheduledExport(
     static function (array $scope) use ($rows, $events): array {

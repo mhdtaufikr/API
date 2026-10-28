@@ -17,11 +17,11 @@ final class LegacyTalentaScheduledExport
     {
         $this->previewer = $previewer ?? static function (array $scope): array {
             $service = new LegacyManualSend(new LegacyAttendanceRepository(Database::open('reader')));
-            return $service->preview(...$scope);
+            return $service->preview($scope[0], $scope[1], $scope[2], $scope[3], true);
         };
         $this->sender = $sender ?? static function (array $scope, string $hash): array {
             $service = new LegacyManualSend(new LegacyAttendanceRepository(Database::open('worker')));
-            return $service->send($scope, $hash);
+            return $service->send($scope, $hash, true);
         };
         $this->logger = $logger ?? static function (array $summary): void {
             (new ReceiverAudit(ROOT . '/storage/legacy-scheduler.jsonl'))->append($summary);
@@ -50,6 +50,8 @@ final class LegacyTalentaScheduledExport
             'slot' => $slot,
             'status' => 'preview',
             'events_pending' => 0,
+            'events_skipped' => 0,
+            'cards_skipped' => 0,
             'batches_submitted' => 0,
             'batches_held' => 0,
             'flags_updated' => 0,
@@ -75,6 +77,7 @@ final class LegacyTalentaScheduledExport
             $from = $now->modify('-' . $days . ' days');
             $plans = [];
             $issues = [];
+            $skippedCards = [];
             for ($date = $from; $date <= $now; $date = $date->modify('+1 day')) {
                 $day = $date->format('Y-m-d');
                 $scope = [$day, $day, '', 'all'];
@@ -84,13 +87,22 @@ final class LegacyTalentaScheduledExport
                     continue;
                 }
                 $summary['events_pending'] += count($plan['events'] ?? []);
+                $summary['events_skipped'] += array_sum(array_column($plan['skipped'] ?? [], 'rows'));
+                foreach ($plan['skipped'] ?? [] as $skipped) {
+                    if (isset($skipped['card'])) {
+                        $skippedCards[(string) $skipped['card']] = true;
+                    }
+                }
+                $summary['cards_skipped'] = count($skippedCards);
                 if (!empty($plan['issues'])) {
                     foreach ($plan['issues'] as $issue) {
                         $issues[] = $day . ': ' . $issue;
                     }
                     continue;
                 }
-                $plans[] = [$scope, $plan];
+                if (!empty($plan['events'])) {
+                    $plans[] = [$scope, $plan];
+                }
             }
 
             if ($issues) {
@@ -102,7 +114,9 @@ final class LegacyTalentaScheduledExport
                 ]);
             }
             if (!$plans) {
-                return $this->finish($summary, ['status' => 'no_pending']);
+                return $this->finish($summary, [
+                    'status' => $summary['events_skipped'] ? ($preview ? 'preview' : 'completed_with_skips') : 'no_pending',
+                ]);
             }
             if ($preview) {
                 return $summary;
@@ -126,7 +140,7 @@ final class LegacyTalentaScheduledExport
                 $summary['flags_updated'] += count($plan['rows'] ?? []);
             }
             return $this->finish($summary, [
-                'status' => $summary['errors'] ? 'completed_with_errors' : 'completed',
+                'status' => $summary['errors'] ? 'completed_with_errors' : ($summary['events_skipped'] ? 'completed_with_skips' : 'completed'),
                 'http' => $lastHttp,
                 'ledger_ids' => $ledgerIds,
             ]);

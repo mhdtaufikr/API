@@ -32,26 +32,45 @@ final class LegacyManualSend
         }
         return $chosen;
     }
-    public function preview(string $from, string $to, string $card, string $selection): array
+    public function preview(string $from, string $to, string $card, string $selection, bool $skipInvalidIdentities = false): array
     {
-        $rows = self::select($this->source->rows($from, $to, $card===''?null:$card), $selection);
+        $selectedRows = self::select($this->source->rows($from, $to, $card===''?null:$card), $selection);
+        $rows = $selectedRows;
         $issues = [];
+        $skipped = [];
         $events = [];
         $csv = '';
         try {
             $maps=[];$cards=array_unique(array_column($rows,'FcCardNo'));
             if(count($cards)>100)throw new RuntimeException('Maksimal 100 karyawan per preview. Persempit tanggal/filter.');
             $started=microtime(true);
-            foreach($cards as $number){if(microtime(true)-$started>60)throw new RuntimeException('Validasi identitas belum selesai. Buka preview lagi untuk melanjutkan cache; belum ada import dikirim.');$maps[$number]=TalentaEmployeeResolver::resolve((string)$number);}
+            foreach($cards as $number){
+                if(microtime(true)-$started>60)throw new RuntimeException('Validasi identitas belum selesai. Buka preview lagi untuk melanjutkan cache; belum ada import dikirim.');
+                try {
+                    $maps[$number]=TalentaEmployeeResolver::resolve((string)$number);
+                } catch (UnsendableTalentaIdentityException $error) {
+                    if (!$skipInvalidIdentities) throw $error;
+                    $skipped[] = [
+                        'card' => (string) $number,
+                        'rows' => count(array_filter($selectedRows, fn($row) => (string) $row['FcCardNo'] === (string) $number)),
+                        'reason' => $error->getMessage(),
+                    ];
+                }
+            }
+            if ($skipInvalidIdentities) {
+                $rows = array_values(array_filter($selectedRows, fn($row) => isset($maps[$row['FcCardNo']])));
+            }
             foreach ($rows as $row) {
                 $map=$maps[$row['FcCardNo']];
                 $events[] = ['nik'=>$map['employee_nik'],'employee_user_id'=>$map['talenta_user_id'],'identity_company'=>$map['company_id'],'identity_verified'=>true,'badge_number'=>$map['badge_number'],'timestamp'=>LegacyAttendanceRepository::timestamp($row),'direction'=>'UNKNOWN','raw_direction'=>$row['FcDirection'],'terminal_id'=>$row['FcTermNo'],'source_flag'=>$row['FlFlag']];
             }
-            $contract = LegacyTrialSetup::draftContract();
-            if (in_array('direction', array_column($contract['csv_columns'], 'source'), true)) {
-                compat_throw(new RuntimeException('Profil CSV meminta IN/OUT tetapi arti FcDirection belum diketahui. Gunakan profil raw yang diverifikasi, jangan menebak arah.'));
+            if ($events) {
+                $contract = LegacyTrialSetup::draftContract();
+                if (in_array('direction', array_column($contract['csv_columns'], 'source'), true)) {
+                    compat_throw(new RuntimeException('Profil CSV meminta IN/OUT tetapi arti FcDirection belum diketahui. Gunakan profil raw yang diverifikasi, jangan menebak arah.'));
+                }
+                $csv = Mekari::importCsv($events, $contract);
             }
-            $csv = Mekari::importCsv($events, $contract);
         } catch (Throwable $e) {
             $issues[] = $e->getMessage();
         }
@@ -59,10 +78,10 @@ final class LegacyManualSend
             $issues[] = 'Pengiriman belum diaktifkan: verifikasi profil CSV/raw, kredensial, NIK/User ID, DRY_RUN dan izin live terlebih dahulu.';
         }
         $generation = is_file(ROOT . '/storage/trial-generation.json') ? jsonFile(ROOT . '/storage/trial-generation.json') : [];
-        $hash = hash('sha256', json_encode([$rows, $events, $csv, config(), IntegrationSettings::fingerprint(), $generation], JSON_THROW_ON_ERROR));
-        return compact('rows', 'events', 'csv', 'issues', 'hash');
+        $hash = hash('sha256', json_encode([$rows, $events, $csv, $skipped, config(), IntegrationSettings::fingerprint(), $generation], JSON_THROW_ON_ERROR));
+        return compact('rows', 'events', 'csv', 'issues', 'skipped', 'hash');
     }
-    public function send(array $scope, string $hash): array
+    public function send(array $scope, string $hash, bool $skipInvalidIdentities = false): array
     {
         if (env('INTEGRATION_STORAGE') !== 'legacy_app') {
             compat_throw(new RuntimeException('Pengiriman hanya tersedia di mode legacy_app.'));
@@ -72,7 +91,7 @@ final class LegacyManualSend
             compat_throw(new RuntimeException('Pengiriman lain sedang berjalan.'));
         }
         try {
-            $p = $this->preview(...$scope);
+            $p = $this->preview($scope[0], $scope[1], $scope[2], $scope[3], $skipInvalidIdentities);
             if ($p['issues']) {
                 compat_throw(new RuntimeException(implode(' ', $p['issues'])));
             }

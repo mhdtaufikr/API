@@ -1,14 +1,15 @@
 <?php
 declare(strict_types=1);
+final class UnsendableTalentaIdentityException extends RuntimeException {}
 final class TalentaEmployeeResolver {
     public static function normalize(array $body,string $card): array {
         $items=$body['data']['employment']??[];if(isset($items['employee_id']))$items=[$items];$found=[];
         foreach($items as $row)if(is_array($row)&&(string)($row['employee_id']??'')===$card&&(string)($row['company_id']??'')===env('MEKARI_COMPANY_ID')){
-            if((string)($row['barcode']??'')!==$card)throw new RuntimeException('Barcode Talenta berbeda untuk kartu '.$card.'. Perlu mapping eksplisit.');
-            if(!preg_match('/\A[1-9][0-9]*\z/',(string)($row['id']??'')))throw new RuntimeException('User ID karyawan tidak valid.');
+            if((string)($row['barcode']??'')!==$card)throw new UnsendableTalentaIdentityException('Barcode Talenta berbeda/kosong untuk kartu '.$card.'.');
+            if(!preg_match('/\A[1-9][0-9]*\z/',(string)($row['id']??'')))throw new UnsendableTalentaIdentityException('User ID karyawan tidak valid untuk kartu '.$card.'.');
             $found[]=['verified'=>true,'card_number'=>$card,'employee_nik'=>(string)$row['employee_id'],'talenta_user_id'=>(string)$row['id'],'badge_number'=>(string)$row['barcode'],'company_id'=>(string)$row['company_id']];
         }
-        if(count($found)!==1)throw new RuntimeException('Kartu '.$card.' tidak ditemukan secara unik di company Talenta.');return $found[0];
+        if(count($found)!==1)throw new UnsendableTalentaIdentityException('Kartu '.$card.' tidak ditemukan secara unik di company Talenta.');return $found[0];
     }
     public static function resolve(string $card): array {
         if(!extension_loaded('curl')||env('MEKARI_BASE_URL')!=='https://api.mekari.com')throw new RuntimeException('cURL/API host Mekari belum sesuai konfigurasi.');
