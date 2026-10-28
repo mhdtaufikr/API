@@ -26,9 +26,13 @@ $events = [
 $plan = ['rows' => $rows, 'events' => $events, 'issues' => [], 'hash' => hash('sha256', 'plan')];
 $sent = 0;
 $logs = [];
+$previewedDates = [];
 $scheduler = new LegacyTalentaScheduledExport(
-    static function (array $scope) use ($plan): array {
-        legacySchedulerCheck($scope === ['2026-10-25', '2026-10-28', '', 'all'], 'Default lookback selects all pending legacy rows');
+    static function (array $scope) use ($plan, &$previewedDates): array {
+        $previewedDates[] = $scope[0];
+        if ($scope[0] !== '2026-10-28') {
+            throw new NoPendingLegacyAttendanceException('none');
+        }
         return $plan;
     },
     static function (array $scope, string $hash) use (&$sent, $plan): array {
@@ -43,16 +47,24 @@ $scheduler = new LegacyTalentaScheduledExport(
 
 $preview = $scheduler->run(true, new DateTimeImmutable('2026-10-28T12:27:00+07:00'));
 legacySchedulerCheck($preview['status'] === 'preview' && $preview['events_pending'] === 1 && $sent === 0, 'Preview works outside a slot without sending or updating flags');
+legacySchedulerCheck($previewedDates === ['2026-10-25', '2026-10-26', '2026-10-27', '2026-10-28'], 'Lookback is partitioned into bounded daily batches');
 
+$previewedDates = [];
 $outside = $scheduler->run(false, new DateTimeImmutable('2026-10-28T12:27:00+07:00'));
 legacySchedulerCheck($outside['status'] === 'outside_schedule' && $sent === 0, 'Live scheduler refuses an out-of-window manual run');
 
+$previewedDates = [];
 $completed = $scheduler->run(false, new DateTimeImmutable('2026-10-28T18:00:00+07:00'));
 legacySchedulerCheck($completed['status'] === 'completed' && $completed['batches_submitted'] === 1 && $completed['flags_updated'] === 1 && $sent === 1, 'Scheduled acceptance updates the exact legacy flag batch');
-legacySchedulerCheck(count($logs) === 2 && $logs[1]['ledger_id'] === 'TEST-LEDGER', 'Non-preview scheduler outcomes are audited without raw attendance payloads');
+legacySchedulerCheck(count($logs) === 2 && $logs[1]['ledger_ids'] === ['TEST-LEDGER'], 'Non-preview scheduler outcomes are audited without raw attendance payloads');
 
 $held = new LegacyTalentaScheduledExport(
-    static fn(array $scope): array => ['rows' => $rows, 'events' => $events, 'issues' => ['Identity held'], 'hash' => 'held'],
+    static function (array $scope) use ($rows, $events): array {
+        if ($scope[0] !== '2026-10-28') {
+            throw new NoPendingLegacyAttendanceException('none');
+        }
+        return ['rows' => $rows, 'events' => $events, 'issues' => ['Identity held'], 'hash' => 'held'];
+    },
     static function (): array {
         throw new LogicException('Held batch must not send.');
     },

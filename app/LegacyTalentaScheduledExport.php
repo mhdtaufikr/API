@@ -72,41 +72,63 @@ final class LegacyTalentaScheduledExport
         }
 
         try {
-            $scope = [
-                $now->modify('-' . $days . ' days')->format('Y-m-d'),
-                $now->format('Y-m-d'),
-                '',
-                'all',
-            ];
-            try {
-                $plan = ($this->previewer)($scope);
-            } catch (NoPendingLegacyAttendanceException $error) {
-                return $this->finish($summary, ['status' => 'no_pending']);
+            $from = $now->modify('-' . $days . ' days');
+            $plans = [];
+            $issues = [];
+            for ($date = $from; $date <= $now; $date = $date->modify('+1 day')) {
+                $day = $date->format('Y-m-d');
+                $scope = [$day, $day, '', 'all'];
+                try {
+                    $plan = ($this->previewer)($scope);
+                } catch (NoPendingLegacyAttendanceException $error) {
+                    continue;
+                }
+                $summary['events_pending'] += count($plan['events'] ?? []);
+                if (!empty($plan['issues'])) {
+                    foreach ($plan['issues'] as $issue) {
+                        $issues[] = $day . ': ' . $issue;
+                    }
+                    continue;
+                }
+                $plans[] = [$scope, $plan];
             }
 
-            $summary['events_pending'] = count($plan['events'] ?? []);
-            if (!empty($plan['issues'])) {
+            if ($issues) {
                 return $this->finish($summary, [
                     'status' => 'held',
-                    'batches_held' => 1,
+                    'batches_held' => count($issues),
                     'errors' => $preview ? 0 : 1,
-                    'reason' => implode(' ', $plan['issues']),
+                    'reason' => implode(' ', $issues),
                 ]);
+            }
+            if (!$plans) {
+                return $this->finish($summary, ['status' => 'no_pending']);
             }
             if ($preview) {
                 return $summary;
             }
 
-            $result = ($this->sender)($scope, (string) $plan['hash']);
-            $accepted = ($result['status'] ?? '') === 'submitted_pending_reconciliation';
-            $flagUpdated = ($result['flag_updated'] ?? false) === true;
+            $ledgerIds = [];
+            $lastHttp = null;
+            foreach ($plans as [$scope, $plan]) {
+                $result = ($this->sender)($scope, (string) $plan['hash']);
+                $accepted = ($result['status'] ?? '') === 'submitted_pending_reconciliation';
+                $flagUpdated = ($result['flag_updated'] ?? false) === true;
+                $lastHttp = $result['http'] ?? null;
+                if (isset($result['id']) && is_string($result['id'])) {
+                    $ledgerIds[] = $result['id'];
+                }
+                if (!$accepted || !$flagUpdated) {
+                    $summary['errors']++;
+                    break;
+                }
+                $summary['batches_submitted']++;
+                $summary['flags_updated'] += count($plan['rows'] ?? []);
+            }
             return $this->finish($summary, [
-                'status' => $accepted && $flagUpdated ? 'completed' : 'completed_with_errors',
-                'batches_submitted' => $accepted ? 1 : 0,
-                'flags_updated' => $flagUpdated ? count($plan['rows'] ?? []) : 0,
-                'errors' => $accepted && $flagUpdated ? 0 : 1,
-                'http' => $result['http'] ?? null,
-                'ledger_id' => $result['id'] ?? null,
+                'status' => $summary['errors'] ? 'completed_with_errors' : 'completed',
+                'http' => $lastHttp,
+                'ledger_ids' => $ledgerIds,
             ]);
         } catch (Throwable $error) {
             return $this->finish($summary, [
