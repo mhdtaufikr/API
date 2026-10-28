@@ -84,6 +84,7 @@ require_once __DIR__ . '/LegacyConfigMigration.php';
 require_once __DIR__ . '/TrialSimulation.php';
 require_once __DIR__ . '/LegacyAttendanceRepository.php';
 require_once __DIR__ . '/LegacyManualSend.php';
+require_once __DIR__ . '/LegacyTalentaScheduledExport.php';
 require_once __DIR__ . '/LegacyTrialSetup.php';
 require_once __DIR__ . '/TalentaEmployeeResolver.php';
 require_once __DIR__ . '/HrmsSdfExport.php';

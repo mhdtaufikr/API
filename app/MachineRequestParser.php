@@ -4,7 +4,6 @@ declare (strict_types=1);
 final class MachineRequestParser
 {
     public const PROFILE = 'observed-v1';
-    public const GET_TIME_TOLERANCE_SECONDS = 60;
     public function parse(array $input): array
     {
         if (array_diff(array_keys($input), ['cardno', 'd', 'h', 'm'])) {
@@ -37,11 +36,13 @@ final class MachineRequestParser
         $getTime = DateTimeImmutable::createFromFormat('!Y/m/d H:i', $input['d'] . ' ' . $input['h'], $zone);
         if (
             !$getTime ||
-            compat_datetime_errors() ||
-            abs($getTime->getTimestamp() - $time->getTimestamp()) > self::GET_TIME_TOLERANCE_SECONDS
+            compat_datetime_errors()
         ) {
-            compat_throw(new InvalidArgumentException('GET time is outside the observed one-minute embedded-time tolerance.'));
+            compat_throw(new InvalidArgumentException('Invalid GET time.'));
         }
+        // Captured terminals update h to their current send time on every retry
+        // while cardno retains the original event timestamp. Treat cardno as the
+        // event-time authority; h remains a validated transport field only.
         if ($time > new DateTimeImmutable('+5 minutes', $zone)) {
             compat_throw(new InvalidArgumentException('Future transaction exceeds the five minute clock tolerance.'));
         }

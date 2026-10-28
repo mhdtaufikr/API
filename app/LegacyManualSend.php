@@ -1,6 +1,10 @@
 <?php
 
 declare (strict_types=1);
+class NoPendingLegacyAttendanceException extends RuntimeException
+{
+}
+
 final class LegacyManualSend
 {
     private LegacyAttendanceRepository $source;
@@ -15,7 +19,7 @@ final class LegacyManualSend
         }
         $chosen = array_values(array_filter($rows, fn($r) => $selection === 'all' ? (string) $r['FlFlag'] === '0' : $r['value_group_hash'] === $selection));
         if (!$chosen) {
-            compat_throw(new RuntimeException('Tidak ada item FlFlag=0 pada pilihan ini.'));
+            compat_throw(new NoPendingLegacyAttendanceException('Tidak ada item FlFlag=0 pada pilihan ini.'));
         }
         foreach ($chosen as $row) {
             if ((string) $row['FlFlag'] !== '0') {

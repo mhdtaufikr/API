@@ -19,9 +19,9 @@ The locally available `C:\xampp\htdocs\API\index.php` and `public\API\index.php`
 ### HTTP 422 — confirmed parser incompatibility
 
 - Evidence: terminal 004 sent embedded `09:40:58` with `h=09:41`. The prior parser required exact `H:i`, so it returned `GET time does not match embedded hour and minute` and the service mapped this to 422.
-- Fix: accept a maximum 60-second difference between the minute-precision `d+h` value and the embedded second-precision timestamp. Date and terminal must still match exactly; malformed and larger time mismatches remain rejected.
-- Risk: this admits a narrow set of near-boundary clock differences. It does not accept arbitrary date/time drift.
-- Test: captured terminal 004 and 003 samples now parse while preserving embedded seconds; a two-minute mismatch remains rejected.
+- Later physical evidence showed that terminals update `h` to their current send time on every retry while `cardno` retains the original event timestamp. Therefore `h` is validated only as an `HH:MM` transport field; it is not cross-checked against the event instant. Date and terminal still match exactly, and the embedded timestamp remains subject to calendar/future validation.
+- Risk: `h` no longer corroborates the event timestamp. The immutable embedded timestamp, exact terminal/date checks, duplicate fingerprint and future-time bound remain authoritative.
+- Test: captured terminal 004/003 samples and multi-minute retries parse while preserving the original embedded seconds; malformed `h` remains rejected.
 
 ### HTTP 503 — confirmed configuration-gate path, exact live trigger not logged
 

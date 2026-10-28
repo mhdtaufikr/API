@@ -21,6 +21,21 @@ try {
         if(!$existing)throw new RuntimeException('Run config:seed first.');
         $values=$service->values();echo json_encode(['driver'=>Database::driver(),'database'=>env('DB_DATABASE'),'config_table'=>LegacyConfigMigration::table(),'profile'=>'talenta','decryption'=>'ok','credentials_configured'=>array_map(fn($value)=>$value!=='',$values??[]),'dry_run'=>enabled('DRY_RUN'),'scheduler_enabled'=>enabled('TALENTA_SCHEDULER_ENABLED')],JSON_PRETTY_PRINT|JSON_THROW_ON_ERROR).PHP_EOL;exit;
     }
+    if ($command === 'talenta:scheduler') {
+        $options = array_slice($argv, 2);
+        if (array_diff($options, ['--preview'])) {
+            compat_throw(new InvalidArgumentException('Use talenta:scheduler [--preview].'));
+        }
+        if (LegacyAttendanceRepository::active() && env('INTEGRATION_STORAGE') !== 'legacy_app') {
+            compat_throw(new RuntimeException('Talenta scheduler is unavailable in read-only/local legacy modes.'));
+        }
+        $scheduler = env('INTEGRATION_STORAGE') === 'legacy_app'
+            ? new LegacyTalentaScheduledExport()
+            : new TalentaScheduledExport();
+        $result = $scheduler->run(in_array('--preview', $options, true));
+        echo json_encode($result, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL;
+        exit($result['errors'] ? 1 : 0);
+    }
     if (LegacyAttendanceRepository::active() && !in_array($command, ['inspect', 'legacy:preview'], true)) {
         compat_throw(new RuntimeException('Legacy compatibility mode permits inspect and legacy:preview only. No migration, seed, processing write or Talenta submission.'));
     }
@@ -32,15 +47,7 @@ try {
         echo json_encode($repo->rows($argv[2], $argv[3], $argv[4]), JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL;
         exit;
     }
-    if ($command === 'talenta:scheduler') {
-        $options = array_slice($argv, 2);
-        if (array_diff($options, ['--preview'])) {
-            compat_throw(new InvalidArgumentException('Use talenta:scheduler [--preview].'));
-        }
-        $result = (new TalentaScheduledExport())->run(in_array('--preview', $options, true));
-        echo json_encode($result, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR) . PHP_EOL;
-        exit($result['errors'] ? 1 : 0);
-    } elseif ($command === 'talenta:scheduler-approve') {
+    if ($command === 'talenta:scheduler-approve') {
         if (count($argv) !== 3 || !str_starts_with($argv[2], '--confirm=')) {
             compat_throw(new InvalidArgumentException('Use talenta:scheduler-approve --confirm="SCHEDULED SEND <NIK>" after reviewing the profile.'));
         }

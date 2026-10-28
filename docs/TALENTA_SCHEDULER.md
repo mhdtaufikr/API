@@ -26,7 +26,9 @@ The existing integration queue and file ledger protect each individual raw event
 
 ## Current state
 
-Code, scheduler preview, Windows task installer and cron example are prepared. **Automatic submission remains disabled** with `TALENTA_SCHEDULER_ENABLED=false`. No operating-system task was installed or enabled, no profile was approved, no production scheduler was changed, and no Talenta import request was made during implementation.
+Code, scheduler preview, Windows task installer and cron example are prepared. **Automatic submission remains disabled** with `TALENTA_SCHEDULER_ENABLED=false` until explicitly enabled in the deployed environment.
+
+When `INTEGRATION_STORAGE=legacy_app`, the same `talenta:scheduler` command now uses the legacy dispatcher instead of generated integration tables. It selects `tbl_rawdata` rows with `FlFlag=0` inside the configured lookback, validates every distinct card against Talenta, builds the verified Attendance MKM CSV in memory/temporary multipart storage, uses the existing ledger to block repeated attempts, and updates the exact source tuples to `FlFlag=1` only after HTTP acceptance. Ambiguous identical tuples, invalid identities, profile mismatches, rejected/unknown outcomes and flag-update failures remain held for reconciliation.
 
 No new database migration is needed; scheduled batches use the existing integration queue. The new status panel on the dashboard shows the three WIB slots and whether automatic submission is enabled.
 
@@ -41,6 +43,8 @@ C:\php\php.exe bin/console.php talenta:scheduler --preview
 ```
 
 Preview requires the configured verified employee and profile contract, but does not send requests, create queue records, or reserve a slot.
+
+In `legacy_app`, preview may perform authenticated employee-information GET requests to validate uncached card identities. It does not call the attendance import endpoint or update `FlFlag`.
 
 4. After completing UAT, set the existing verified write gates deliberately: `DRY_RUN=false`, `ALLOW_PRODUCTION_WRITE=true`, `TALENTA_CSV_PROFILE_CONFIRMED=true`. These alone do not enable the scheduler.
 5. Approve the concrete employee/company/configuration profile:
@@ -59,6 +63,8 @@ C:\php\php.exe bin/console.php talenta:scheduler
 
 Normal operation additionally checks profile approval, every existing live-write gate, HR protections and duplicate keys. A slot may start within `TALENTA_SCHEDULE_WINDOW_MINUTES=15` minutes of the nominal time (set 1 for a strict one-minute window). Outside those windows it does not send. Missed slots are not sent at arbitrary hours; eligible events are considered at the next slot, within `TALENTA_SCHEDULE_LOOKBACK_DAYS=3` (allowed 1..7).
 
+The generated integration scheduler retains its signed-profile approval. The `legacy_app` scheduler instead requires the already reviewed legacy gates (`TALENTA_LEGACY_RAW_CONFIRMED`, CSV profile confirmation, live-write flags, credentials) and reuses the exact preview hash immediately before submission.
+
 ### Windows Task Scheduler
 
 `bin/install-talenta-schedule.ps1` prepares a new task with three daily triggers. It requires the Windows timezone `SE Asia Standard Time`, verifies the PHP path and refuses to overwrite an existing task name. It never changes the timezone or existing legacy tasks.
@@ -76,6 +82,7 @@ The resulting task is **disabled**. Review its service account, PHP path, networ
 ## Logs and reconciliation
 
 - `storage/scheduler.jsonl`: slot result and counters, without credentials or raw HR payloads.
+- `storage/legacy-scheduler.jsonl`: legacy slot result, pending/submitted/flag counters and safe ledger reference, without CSV or raw attendance rows.
 - `storage/scheduler-state.json`: attempted-slot reservations. Do not delete to force a retry.
 - `storage/scheduler-approval.json`: signed profile fingerprint, no secret values.
 - Existing database queue and `storage/ledger.json`: event reservations and API result metadata.

@@ -51,9 +51,9 @@ Existing identical tuples are retained on reads. On receiver replay, a matching 
 
 ## Remaining integration work
 
-Legacy reads/local receiver insertion are implemented. Generated integration mode remains backward compatible and retains shift/overnight/missing-punch/CSV/identity/queue behavior. Persisted legacy processing and dispatch are **not yet bridged** to that engine. Its source FKs reference attendance_raw_events.id; the legacy source has no such key. Do not pretend a tuple hash or PostgreSQL ctid is a stable occurrence ID.
+Legacy reads, physical receiver insertion, reviewed manual dispatch and scheduled legacy dispatch are implemented without generated integration tables. Generated integration mode remains backward compatible and retains shift/overnight/missing-punch/CSV/identity/queue behavior. The legacy scheduler deliberately uses exact source tuples plus the file ledger rather than pretending a tuple hash or PostgreSQL ctid is a stable database occurrence ID.
 
-Before enabling real dispatch, agree a durable receipt/occurrence registry in a separate integration store and its ambiguity policy, verify protocol/legacy direction mapping, map user/badge identities, and confirm CSV profile. Then implement processor/queue source adapters and shadow reconciliation. Do not reuse tbl_absen as an IN/OUT result table; it lacks the needed fields. No FlFlag=1 writer is supplied in this phase, per the latest explicit instruction. API failure/unknown outcomes remain guarded by the existing ledger in old integration mode; legacy mode cannot submit at all.
+Before enabling real dispatch, verify protocol/legacy direction mapping, employee/user/badge identities, the Attendance MKM CSV profile, scheduler service-account network access and the current pending set. Do not reuse tbl_absen as an IN/OUT result table; it lacks the needed fields. API rejection/unknown outcomes remain guarded by the existing ledger and are never automatically retried. The exact `FlFlag` writer runs transactionally only after HTTP acceptance; ambiguous tuples or changed flags hold the batch.
 
 ## Validation on 27 October 2026
 
