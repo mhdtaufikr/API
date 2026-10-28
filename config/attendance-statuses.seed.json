@@ -1,0 +1,11 @@
+[
+ {"code":"PRESENT","condition_key":"present","label":"Present","priority":10},
+ {"code":"LATE","condition_key":"late","label":"Late","priority":50},
+ {"code":"EARLY_LEAVE","condition_key":"early_leave","label":"Early leave","priority":45},
+ {"code":"INCOMPLETE","condition_key":"incomplete","label":"Missing punch","priority":70},
+ {"code":"ABSENT","condition_key":"absent","label":"Absent","priority":80},
+ {"code":"DAY_OFF","condition_key":"day_off","label":"Day off","priority":5},
+ {"code":"HOLIDAY","condition_key":"holiday","label":"Holiday","priority":5},
+ {"code":"WORKED_DAY_OFF","condition_key":"worked_day_off","label":"Worked on non-working day","priority":20},
+ {"code":"MANUAL_REVIEW","condition_key":"manual_review","label":"Manual review required","priority":100}
+]

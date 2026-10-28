@@ -1,0 +1,177 @@
+bin\setup-mysql.php:8:    $stmt=$pdo->prepare('SELECT GET_LOCK(:name,5)');$stmt->execute(['name'=>'mkm-attendance-local-setup']);
+bin\setup-mysql.php:10:    $stmt=$pdo->prepare('SELECT table_schema AS table_schema,table_name AS table_name,column_name AS column_name,data_type AS data_type FROM information_schema.columns WHERE table_schema=:schema ORDER BY table_name,ordinal_position');$stmt->execute(['schema'=>env('DB_DATABASE')]);
+bin\setup-mysql.php:20:    $stmt=$pdo->prepare('INSERT INTO schema_version (version,checksum) VALUES (:version,:checksum)');$stmt->execute(['version'=>1,'checksum'=>hash('sha256',$sql)]);
+bin\inspect-mysql.php:6:    echo 'Server: '.$pdo->query('SELECT VERSION()')->fetchColumn().PHP_EOL;
+bin\inspect-mysql.php:7:    $stmt=$pdo->prepare("SELECT TABLE_SCHEMA,TABLE_NAME,COLUMN_NAME,DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA NOT IN ('mysql','information_schema','performance_schema','phpmyadmin','sys') AND (TABLE_SCHEMA LIKE :schema OR TABLE_NAME LIKE :table OR TABLE_NAME = :raw) ORDER BY TABLE_SCHEMA,TABLE_NAME,ORDINAL_POSITION");
+bin\inspect-mysql.php:11:    $stmt=$pdo->prepare('SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME=:name');$stmt->execute(['name'=>'mkm_attendance_local']);
+app\AttendanceRepository.php:20:            $sql=preg_replace('/ON CONFLICT \([a-z_]+\) DO UPDATE SET/','ON DUPLICATE KEY UPDATE',$sql);
+app\AttendanceRepository.php:32:        $row=$this->query('SELECT checksum FROM mkm_attendance.schema_version WHERE version = :version',['version'=>1])->fetch(PDO::FETCH_ASSOC);
+app\AttendanceRepository.php:37:        $sql='INSERT INTO mkm_attendance.attendance_raw_events (card_number,terminal_id,direction_code,event_datetime,raw_message,protocol_profile,request_payload,source_ip,event_hash) VALUES (:card_number,:terminal_id,:direction_code,:event_datetime,:raw_message,:protocol_profile,CAST(:payload AS jsonb),CAST(:source_ip AS inet),:event_hash) ON CONFLICT (event_hash) DO NOTHING RETURNING id';
+app\AttendanceRepository.php:51:        $row=$this->query('SELECT * FROM mkm_attendance.attendance_raw_events WHERE event_hash = :hash',['hash'=>$hash])->fetch(PDO::FETCH_ASSOC);
+app\AttendanceRepository.php:54:    public function recent(): array { return array_map($this->normalize(...),$this->query('SELECT * FROM mkm_attendance.attendance_raw_events ORDER BY id DESC LIMIT 100')->fetchAll(PDO::FETCH_ASSOC)); }
+app\AttendanceRepository.php:55:    public function count(): int { return (int)$this->query('SELECT COUNT(*) FROM mkm_attendance.attendance_raw_events')->fetchColumn(); }
+app\AttendanceRepository.php:62:        $scope=$nik===null?'':' AND card_number IN (SELECT card_number FROM mkm_attendance.employee_mappings WHERE employee_nik=:nik)';$params=['start'=>$start,'end'=>$end];if ($nik!==null)$params['nik']=$nik;
+app\AttendanceRepository.php:63:        $rows=$this->query('SELECT * FROM mkm_attendance.attendance_raw_events WHERE event_datetime >= :start AND event_datetime < :end'.$scope.' ORDER BY event_datetime,id LIMIT 5001',$params)->fetchAll(PDO::FETCH_ASSOC);
+app\AttendanceRepository.php:65:        $snapshot=['rows'=>array_map($this->normalize(...),$rows),'mappings'=>$this->query('SELECT * FROM mkm_attendance.employee_mappings'.($nik===null?'':' WHERE employee_nik=:nik').' ORDER BY card_number',$nik===null?[]:['nik'=>$nik])->fetchAll(PDO::FETCH_ASSOC),'shifts'=>$this->query('SELECT * FROM mkm_attendance.shifts ORDER BY code')->fetchAll(PDO::FETCH_ASSOC),'terminals'=>$this->query('SELECT * FROM mkm_attendance.terminals ORDER BY terminal_id')->fetchAll(PDO::FETCH_ASSOC)];
+app\AttendanceRepository.php:72:    public function queue(): array { return $this->query('SELECT id,employee_nik,shift_date,status,response,created_at FROM mkm_attendance.integration_queue ORDER BY id DESC LIMIT 100')->fetchAll(PDO::FETCH_ASSOC); }
+app\AttendanceRepository.php:74:        return $this->query('SELECT status,COUNT(*) AS total FROM mkm_attendance.integration_queue GROUP BY status')->fetchAll(PDO::FETCH_KEY_PAIR);
+app\AttendanceRepository.php:77:        $row=$this->query('SELECT * FROM mkm_attendance.integration_queue WHERE id = :id',['id'=>$id])->fetch(PDO::FETCH_ASSOC);
+app\AttendanceRepository.php:91:            $sql='INSERT INTO mkm_attendance.integration_queue (batch_hash,card_number,employee_nik,shift_date,snapshot) VALUES (:hash,:card,:nik,:date,CAST(:snapshot AS jsonb))';
+app\AttendanceRepository.php:96:            foreach ($group['events'] as $event) $this->query('INSERT INTO mkm_attendance.queue_events (queue_id,raw_event_id) VALUES (:queue,:event)',['queue'=>$id,'event'=>$event['id']]);
+app\AttendanceRepository.php:105:        $stmt=$this->query("UPDATE mkm_attendance.integration_queue SET status = 'reserved',updated_at = CURRENT_TIMESTAMP WHERE id = :id AND status = 'pending_review'",['id'=>$id]);
+app\AttendanceRepository.php:110:        $mapping=$this->query('SELECT * FROM mkm_attendance.employee_mappings WHERE employee_nik=:nik',['nik'=>$nik])->fetch(PDO::FETCH_ASSOC);
+app\AttendanceRepository.php:114:        return ['mapping'=>$mapping,'shifts'=>$this->query('SELECT * FROM mkm_attendance.shifts ORDER BY code')->fetchAll(PDO::FETCH_ASSOC),'terminals'=>$this->query('SELECT * FROM mkm_attendance.terminals ORDER BY terminal_id')->fetchAll(PDO::FETCH_ASSOC),
+app\AttendanceRepository.php:115:            'assignments'=>$this->query('SELECT * FROM mkm_attendance.attendance_shift_assignments WHERE employee_nik=:nik ORDER BY id',['nik'=>$nik])->fetchAll(PDO::FETCH_ASSOC),
+app\AttendanceRepository.php:116:            'calendar'=>$this->query('SELECT * FROM mkm_attendance.attendance_work_calendar WHERE employee_nik=:nik OR employee_nik IS NULL ORDER BY id',['nik'=>$nik])->fetchAll(PDO::FETCH_ASSOC),
+app\AttendanceRepository.php:117:            'statuses'=>$this->query('SELECT * FROM mkm_attendance.attendance_statuses ORDER BY code')->fetchAll(PDO::FETCH_ASSOC)];
+app\AttendanceRepository.php:122:        return array_map('intval',$this->query('SELECT raw_event_id FROM mkm_attendance.queue_events WHERE raw_event_id IN ('.implode(',',$holders).')',$params)->fetchAll(PDO::FETCH_COLUMN));
+app\AttendanceRepository.php:131:            $sql='INSERT INTO mkm_attendance.integration_queue (batch_hash,card_number,employee_nik,shift_date,snapshot) VALUES (:hash,:card,:nik,:date,CAST(:snapshot AS jsonb))';
+app\AttendanceRepository.php:135:            foreach ($events as $event)$this->query('INSERT INTO mkm_attendance.queue_events (queue_id,raw_event_id) VALUES (:queue,:event)',['queue'=>$id,'event'=>$event['id']]);
+app\AttendanceRepository.php:141:        $this->query('UPDATE mkm_attendance.integration_queue SET status = :status,response = CAST(:response AS jsonb),updated_at = CURRENT_TIMESTAMP WHERE id = :id AND status = :reserved',['id'=>$id,'status'=>$response['status'],'response'=>json_encode($response,JSON_THROW_ON_ERROR),'reserved'=>'reserved']);
+app\AttendanceRepository.php:146:        $stmt=$this->query("UPDATE mkm_attendance.integration_queue SET status=:status,response=$merge,updated_at=CURRENT_TIMESTAMP WHERE id=:id AND status IN ('reserved','submitted_pending_reconciliation','unknown','rejected')",['status'=>$success?'confirmed':'confirmed_failed','evidence'=>json_encode(['verified_at'=>gmdate('c'),'verification_reference'=>$reference],JSON_THROW_ON_ERROR),'id'=>$id]);
+app\AttendanceRepository.php:159:            $this->query('INSERT INTO mkm_attendance.shifts (code,timezone,start_time,end_time,weekdays,in_before_minutes,in_after_minutes,out_before_minutes,out_after_minutes) VALUES (:code,:timezone,:start_time,:end_time,CAST(:weekdays AS jsonb),:in_before_minutes,:in_after_minutes,:out_before_minutes,:out_after_minutes) ON CONFLICT (code) DO UPDATE SET timezone=EXCLUDED.timezone,start_time=EXCLUDED.start_time,end_time=EXCLUDED.end_time,weekdays=EXCLUDED.weekdays,in_before_minutes=EXCLUDED.in_before_minutes,in_after_minutes=EXCLUDED.in_after_minutes,out_before_minutes=EXCLUDED.out_before_minutes,out_after_minutes=EXCLUDED.out_after_minutes',array_intersect_key($value,array_flip(['code','timezone','start_time','end_time','weekdays','in_before_minutes','in_after_minutes','out_before_minutes','out_after_minutes'])));
+app\AttendanceRepository.php:163:            $this->query('INSERT INTO mkm_attendance.terminals (terminal_id,direction_map) VALUES (:id,CAST(:map AS jsonb)) ON CONFLICT (terminal_id) DO UPDATE SET direction_map=EXCLUDED.direction_map',['id'=>$value['terminal_id'],'map'=>json_encode((object)$value['direction_map'],JSON_THROW_ON_ERROR)]);
+app\AttendanceRepository.php:169:            $this->query('INSERT INTO mkm_attendance.employee_mappings (card_number,employee_nik,employee_name,talenta_employee_id,talenta_user_id,badge_number,shift_code,verified) VALUES (:card_number,:employee_nik,:employee_name,:talenta_employee_id,:talenta_user_id,:badge_number,:shift_code,CAST(:verified AS boolean)) ON CONFLICT (card_number) DO UPDATE SET employee_nik=EXCLUDED.employee_nik,employee_name=EXCLUDED.employee_name,talenta_employee_id=EXCLUDED.talenta_employee_id,talenta_user_id=EXCLUDED.talenta_user_id,badge_number=EXCLUDED.badge_number,shift_code=EXCLUDED.shift_code,verified=EXCLUDED.verified,updated_at=CURRENT_TIMESTAMP',$params);
+migrations\001_machine_integration.mysql.sql:2:CREATE TABLE schema_version (
+migrations\001_machine_integration.mysql.sql:7:CREATE TABLE attendance_raw_events (
+migrations\001_machine_integration.mysql.sql:21:CREATE TABLE shifts (
+migrations\001_machine_integration.mysql.sql:32:CREATE TABLE terminals (
+migrations\001_machine_integration.mysql.sql:36:CREATE TABLE employee_mappings (
+migrations\001_machine_integration.mysql.sql:46:    FOREIGN KEY (shift_code) REFERENCES shifts(code)
+migrations\001_machine_integration.mysql.sql:48:CREATE TABLE integration_queue (
+migrations\001_machine_integration.mysql.sql:61:CREATE TABLE queue_events (
+migrations\001_machine_integration.mysql.sql:65:    FOREIGN KEY (queue_id) REFERENCES integration_queue(id),
+migrations\001_machine_integration.mysql.sql:66:    FOREIGN KEY (raw_event_id) REFERENCES attendance_raw_events(id)
+app\AttendanceEngineRepository.php:9:        $checksum=$this->q('SELECT checksum FROM '.$this->t('schema_version').' WHERE version=:version',['version'=>3])->fetchColumn();
+app\AttendanceEngineRepository.php:22:        return ['assignments'=>$this->q('SELECT * FROM '.$this->t('attendance_shift_assignments').$range.' ORDER BY id',$params)->fetchAll(PDO::FETCH_ASSOC),
+app\AttendanceEngineRepository.php:23:            'calendar'=>$this->q('SELECT * FROM '.$this->t('attendance_work_calendar').$range.' ORDER BY id',$params)->fetchAll(PDO::FETCH_ASSOC),
+app\AttendanceEngineRepository.php:24:            'statuses'=>$this->q('SELECT * FROM '.$this->t('attendance_statuses').' ORDER BY code')->fetchAll(PDO::FETCH_ASSOC),
+app\AttendanceEngineRepository.php:25:            'approved_requests'=>$this->q('SELECT * FROM '.$this->t('attendance_requests').$dates.' ORDER BY id',$params)->fetchAll(PDO::FETCH_ASSOC),
+app\AttendanceEngineRepository.php:26:            'period_locks'=>$this->q('SELECT * FROM '.$this->t('attendance_period_locks').$range.' ORDER BY id',$params)->fetchAll(PDO::FETCH_ASSOC),
+app\AttendanceEngineRepository.php:27:            'attendance_records'=>$this->q('SELECT id,input_hash,employee_nik,attendance_date,hr_manually_corrected,is_confirmed,approved_request_id,final_status_source FROM '.$this->t('attendances').$dates,$params)->fetchAll(PDO::FETCH_ASSOC)];
+app\AttendanceEngineRepository.php:30:        return $this->q('SELECT employee_nik FROM '.$this->t('employee_mappings').($nik===null?'':' WHERE employee_nik=:nik').' ORDER BY employee_nik',$nik===null?[]:['nik'=>$nik])->fetchAll(PDO::FETCH_COLUMN);
+app\AttendanceEngineRepository.php:32:    public function recent(): array { $this->requireInstalled();return $this->q('SELECT * FROM '.$this->t('attendances').' ORDER BY attendance_date DESC,employee_nik LIMIT 100')->fetchAll(PDO::FETCH_ASSOC); }
+app\AttendanceEngineRepository.php:33:    public function find(string $nik,string $date,bool $lock=false): ?array { return $this->q('SELECT * FROM '.$this->t('attendances').' WHERE employee_nik=:nik AND attendance_date=:date'.($lock?' FOR UPDATE':''),['nik'=>$nik,'date'=>$date])->fetch(PDO::FETCH_ASSOC)?:null; }
+app\AttendanceEngineRepository.php:37:            $sql='INSERT INTO '.$this->t('attendance_statuses').' (code,condition_key,label,priority) VALUES (:code,:condition_key,:label,:priority)';
+app\AttendanceEngineRepository.php:38:            $sql.=Database::driver()==='mysql'?' ON DUPLICATE KEY UPDATE code=code':' ON CONFLICT DO NOTHING';$count+=$this->q($sql,$row)->rowCount();
+app\AttendanceEngineRepository.php:44:        return (bool)$this->q('SELECT id FROM '.$this->t('attendance_period_locks').' WHERE (employee_nik=:nik OR employee_nik IS NULL) AND from_date<=:start AND to_date>=:end AND locked=TRUE LIMIT 1',['nik'=>$nik,'start'=>$date,'end'=>$date])->fetchColumn();
+app\AttendanceEngineRepository.php:49:        if ($this->q('SELECT id FROM '.$this->t('attendance_requests').' WHERE employee_nik=:nik AND attendance_date=:date AND state=:state',['nik'=>$group['employee_nik'],'date'=>$group['attendance_date'],'state'=>'approved'])->fetchColumn())return false;
+app\AttendanceEngineRepository.php:56:            if ($mysql) { if ((int)$this->q('SELECT GET_LOCK(:key,5)',['key'=>$lockName])->fetchColumn()!==1)throw new RuntimeException('Attendance date is being processed by another worker.'); }
+app\AttendanceEngineRepository.php:58:            if (!$mysql)$this->q('SELECT pg_advisory_xact_lock(hashtext(:key))',['key'=>$lockName]);
+app\AttendanceEngineRepository.php:69:            $requests=$this->q('SELECT * FROM '.$this->t('attendance_requests').' WHERE employee_nik=:nik AND attendance_date=:date AND state=:state',['nik'=>$nik,'date'=>$date,'state'=>'approved'])->fetchAll(PDO::FETCH_ASSOC);
+app\AttendanceEngineRepository.php:85:                $this->q('UPDATE '.$this->t('attendances').' SET '.implode(',',$sets).',updated_at=CURRENT_TIMESTAMP WHERE id=:id',$fields+['id'=>$existing['id']]);$id=(int)$existing['id'];
+app\AttendanceEngineRepository.php:86:                $this->q('DELETE FROM '.$this->t('attendance_sources').' WHERE attendance_id=:id',['id'=>$id]);
+app\AttendanceEngineRepository.php:88:                $stmt=$this->q('INSERT INTO '.$this->t('attendances').' ('.implode(',',array_keys($fields)).') VALUES ('.implode(',',$expressions).')'.($mysql?'':' RETURNING id'),$fields);$id=$mysql?(int)$this->pdo->lastInsertId():(int)$stmt->fetchColumn();
+app\AttendanceEngineRepository.php:90:            foreach ($record['source_classifications'] as $rawId=>$classification)$this->q('INSERT INTO '.$this->t('attendance_sources').' (attendance_id,raw_event_id,classification) VALUES (:attendance,:raw,:classification)',['attendance'=>$id,'raw'=>$rawId,'classification'=>$classification]);
+app\AttendanceEngineRepository.php:93:        finally { if (!$dryRun&&$mysql)$this->q('SELECT RELEASE_LOCK(:key)',['key'=>$lockName]); }
+app\AttendanceEngineRepository.php:108:            elseif (!is_string($value)||!$this->q('SELECT code FROM '.$this->t('attendance_statuses').' WHERE code=:code',['code'=>$value])->fetchColumn())throw new InvalidArgumentException('Approved status must exist in the configured status master.');
+app\AttendanceEngineRepository.php:115:        if (!$dryRun) { try { $this->q('INSERT INTO '.$this->t('attendance_processing_errors').' (employee_nik,attendance_date,error_class,message) VALUES (:nik,:date,:class,:message)',['nik'=>$nik,'date'=>$date,'class'=>get_class($error),'message'=>$message]);return; }catch (Throwable) {} }
+app\AttendanceEngineRepository.php:123:            $existing=$this->q('SELECT code FROM '.$this->t('attendance_statuses').' WHERE condition_key=:key',['key'=>$value['condition_key']])->fetchColumn();
+app\AttendanceEngineRepository.php:125:            $condition=$this->q('SELECT condition_key FROM '.$this->t('attendance_statuses').' WHERE code=:code',['code'=>$value['code']])->fetchColumn();
+app\AttendanceEngineRepository.php:128:            $sql='INSERT INTO '.$this->t('attendance_statuses').' (code,condition_key,label,priority) VALUES (:code,:condition_key,:label,:priority)';
+app\AttendanceEngineRepository.php:129:            $sql.=Database::driver()==='mysql'?' ON DUPLICATE KEY UPDATE label=VALUES(label),priority=VALUES(priority)':' ON CONFLICT (code) DO UPDATE SET label=EXCLUDED.label,priority=EXCLUDED.priority';$this->q($sql,$params);return;
+app\AttendanceEngineRepository.php:137:            if (!$this->q('SELECT code FROM '.$this->t('shifts').' WHERE code=:code',['code'=>$params['code']])->fetchColumn())throw new InvalidArgumentException('Configure the existing shift master first.');
+app\AttendanceEngineRepository.php:138:            $this->q('UPDATE '.$this->t('shifts').' SET late_grace_minutes=:late_grace_minutes,early_leave_grace_minutes=:early_leave_grace_minutes,duplicate_tap_seconds=:duplicate_tap_seconds,window_fallback_enabled=:window_fallback_enabled,minute_rounding=:minute_rounding,grace_mode=:grace_mode WHERE code=:code',$params);return;
+app\AttendanceEngineRepository.php:150:                $this->q('UPDATE '.$this->t('attendances').' SET '.implode(',',$sets).",hr_manually_corrected=TRUE,final_status_source='hr_manual',protection_reason=:reason,updated_at=CURRENT_TIMESTAMP WHERE id=:id",$params);$finish(true);return;
+app\AttendanceEngineRepository.php:157:            $this->q('INSERT INTO '.$this->t('attendance_requests').' (reference,employee_nik,attendance_date,state,approved_values) VALUES (:reference,:employee_nik,:attendance_date,:state,'.$json.')',$params);return;
+app\AttendanceEngineRepository.php:168:        $sql='INSERT INTO '.$this->t($table).' ('.implode(',',array_keys($params)).') VALUES (:'.implode(',:',array_keys($params)).')';$updates=[];
+app\AttendanceEngineRepository.php:170:        $sql.=Database::driver()==='mysql'?' ON DUPLICATE KEY UPDATE '.implode(',',$updates):' ON CONFLICT ('.$hashField.') DO UPDATE SET '.implode(',',$updates);$this->q($sql,$params);
+migrations\003_attendance_engine.mysql.sql:1:ALTER TABLE shifts
+migrations\003_attendance_engine.mysql.sql:8:CREATE TABLE attendance_shift_assignments (
+migrations\003_attendance_engine.mysql.sql:12: FOREIGN KEY (shift_code) REFERENCES shifts(code), INDEX roster_employee_dates (employee_nik,from_date,to_date)
+migrations\003_attendance_engine.mysql.sql:14:CREATE TABLE attendance_work_calendar (
+migrations\003_attendance_engine.mysql.sql:19:CREATE TABLE attendance_statuses (
+migrations\003_attendance_engine.mysql.sql:23:CREATE TABLE attendance_requests (
+migrations\003_attendance_engine.mysql.sql:29:CREATE TABLE attendance_period_locks (
+migrations\003_attendance_engine.mysql.sql:34:CREATE TABLE attendances (
+migrations\003_attendance_engine.mysql.sql:45: UNIQUE attendance_employee_date (employee_nik,attendance_date), FOREIGN KEY (approved_request_id) REFERENCES attendance_requests(id)
+migrations\003_attendance_engine.mysql.sql:47:CREATE TABLE attendance_sources (
+migrations\003_attendance_engine.mysql.sql:49: PRIMARY KEY (attendance_id,raw_event_id), FOREIGN KEY (attendance_id) REFERENCES attendances(id),
+migrations\003_attendance_engine.mysql.sql:50: FOREIGN KEY (raw_event_id) REFERENCES attendance_raw_events(id)
+migrations\003_attendance_engine.mysql.sql:52:CREATE TABLE attendance_processing_errors (
+migrations\local_legacy.pgsql.sql:2:CREATE TABLE public.tbl_rawdata (
+migrations\local_legacy.pgsql.sql:10:CREATE TABLE public.tbl_absen (
+migrations\local_legacy.pgsql.sql:16:CREATE TABLE public.tbl_log (
+migrations\local_legacy.mysql.sql:2:CREATE TABLE tbl_rawdata (FdDate DATE DEFAULT NULL,FcTime TIME DEFAULT NULL,FcCardNo VARCHAR(50) DEFAULT NULL,FcDirection VARCHAR(1) DEFAULT NULL,FcTermNo VARCHAR(3) DEFAULT NULL,FlFlag TINYINT DEFAULT NULL) ENGINE=InnoDB;
+migrations\local_legacy.mysql.sql:3:CREATE TABLE tbl_absen (FdDate DATETIME DEFAULT NULL,FcCardNo VARCHAR(50) DEFAULT NULL,FcDirection VARCHAR(1) DEFAULT NULL,FcTermNo VARCHAR(3) DEFAULT NULL) ENGINE=InnoDB;
+migrations\local_legacy.mysql.sql:4:CREATE TABLE tbl_log (FdDateTime DATETIME DEFAULT NULL,FcMessage VARCHAR(80) DEFAULT NULL) ENGINE=InnoDB;
+app\IntegrationSettings.php:10:        $stmt=$this->pdo->prepare('SELECT * FROM '.IntegrationMigrations::table('integration_settings').' WHERE provider=:provider');$stmt->execute(['provider'=>'talenta']);return $stmt->fetch(PDO::FETCH_ASSOC)?:null;
+app\IntegrationSettings.php:14:        $sql='INSERT INTO '.IntegrationMigrations::table('integration_settings').(LegacyConfigMigration::active()?" (provider,audit_history) VALUES (:provider,'[]')":' (provider) VALUES (:provider)');
+app\IntegrationSettings.php:15:        $sql.=Database::driver()==='mysql'?' ON DUPLICATE KEY UPDATE provider=VALUES(provider)':' ON CONFLICT (provider) DO NOTHING';
+app\IntegrationSettings.php:49:            $sql='UPDATE '.IntegrationMigrations::table('integration_settings').' SET '.implode(',',$sets).',revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE provider=:provider AND revision=:revision';
+app\IntegrationSettings.php:57:            $stmt=$this->pdo->prepare("UPDATE ".LegacyConfigMigration::table()." SET audit_history=JSON_ARRAY_APPEND(audit_history,'$',JSON_OBJECT('action',:action,'fields',:fields,'at',:at)) WHERE provider=:provider");
+app\IntegrationSettings.php:61:        $stmt=$this->pdo->prepare('INSERT INTO '.IntegrationMigrations::table('integration_settings_audit').' (provider,action,changed_fields) VALUES (:provider,:action,'.$json.')');
+app\IntegrationMigrations.php:17:                $stmt=$pdo->prepare('SELECT GET_LOCK(:name,5)');$stmt->execute(['name'=>'mkm-attendance-migrations-'.substr(hash('sha256',env('DB_DATABASE')),0,16)]);
+app\IntegrationMigrations.php:19:            } else { $pdo->beginTransaction();$pdo->exec('SELECT pg_advisory_xact_lock(18421027)'); }
+app\IntegrationMigrations.php:31:            $versions=$pdo->query('SELECT version,checksum FROM '.self::table('schema_version'))->fetchAll(PDO::FETCH_KEY_PAIR);
+app\IntegrationMigrations.php:46:            if ($locked) { $stmt=$pdo->prepare('SELECT RELEASE_LOCK(:name)');$stmt->execute(['name'=>'mkm-attendance-migrations-'.substr(hash('sha256',env('DB_DATABASE')),0,16)]); }
+app\IntegrationMigrations.php:53:        $stmt=$pdo->prepare('INSERT INTO '.self::table('schema_version').' (version,checksum) VALUES (:version,:checksum)');$stmt->execute(['version'=>$version,'checksum'=>$checksum]);
+app\Database.php:39:        if (self::driver()==='mysql') return $pdo->query("SELECT table_schema AS table_schema,table_name AS table_name,column_name AS column_name,data_type AS data_type,column_type AS udt_name FROM information_schema.columns WHERE table_schema=DATABASE() ORDER BY table_name,ordinal_position")->fetchAll(PDO::FETCH_ASSOC);
+app\Database.php:40:        return $pdo->query("SELECT table_schema, table_name, column_name, data_type, udt_name FROM information_schema.columns WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_schema, table_name, ordinal_position")->fetchAll(PDO::FETCH_ASSOC);
+app\Database.php:54:        $sql = 'SELECT ' . $q($map['nik']) . '::text AS nik, ' . $q($map['timestamp']) . '::text AS timestamp, ' . $q($map['direction']) . '::text AS direction FROM ' . $q($map['schema']) . '.' . $q($map['table']) . ' WHERE ' . $q($map['nik']) . '::text = :nik AND ' . $q($map['timestamp']) . ' >= :start AND ' . $q($map['timestamp']) . ' < :end ORDER BY ' . $q($map['timestamp']) . ' LIMIT 1001';
+app\LegacyConfigMigration.php:12:        $stmt=$pdo->prepare('SELECT TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:table');
+app\LegacyConfigMigration.php:22:        $pdo->exec('CREATE TABLE '.$table." (
+app\LegacyAttendanceRepository.php:23:        $sql='SELECT '.$fields.' FROM '.$this->table().' WHERE '.$q('FdDate').' >= :start AND '.$q('FdDate').' <= :end';
+app\LegacyAttendanceRepository.php:55:            if($mysql){$s=$this->pdo->prepare('SELECT GET_LOCK(:name,5)');$s->execute(['name'=>$key]);if((int)$s->fetchColumn()!==1)throw new RuntimeException('Receiver lock unavailable.');}
+app\LegacyAttendanceRepository.php:56:            $this->pdo->beginTransaction();if(!$mysql)$this->pdo->exec('SELECT pg_advisory_xact_lock(18421028)');
+app\LegacyAttendanceRepository.php:58:            $s=$this->pdo->prepare('SELECT COUNT(*) FROM '.$this->table().' WHERE '.implode(' AND ',$where));$s->execute(array_diff_key($row,['FlFlag'=>true]));
+app\LegacyAttendanceRepository.php:61:            $s=$this->pdo->prepare('INSERT INTO '.$this->table().' ('.$fields.') VALUES ('.$holders.')');$s->execute($row);$this->pdo->commit();
+app\LegacyAttendanceRepository.php:64:        finally{if($mysql){$s=$this->pdo->prepare('SELECT RELEASE_LOCK(:name)');$s->execute(['name'=>$key]);}}
+migrations\002_integration_credentials.mysql.sql:1:CREATE TABLE integration_settings (
+migrations\002_integration_credentials.mysql.sql:10:CREATE TABLE integration_settings_audit (
+migrations\001_machine_integration.sql:3:CREATE TABLE mkm_attendance.schema_version (
+migrations\001_machine_integration.sql:8:CREATE TABLE mkm_attendance.attendance_raw_events (
+migrations\001_machine_integration.sql:22:CREATE TABLE mkm_attendance.shifts (
+migrations\001_machine_integration.sql:33:CREATE TABLE mkm_attendance.terminals (
+migrations\001_machine_integration.sql:37:CREATE TABLE mkm_attendance.employee_mappings (
+migrations\001_machine_integration.sql:44:    shift_code VARCHAR(30) REFERENCES mkm_attendance.shifts(code),
+migrations\001_machine_integration.sql:48:CREATE TABLE mkm_attendance.integration_queue (
+migrations\001_machine_integration.sql:61:CREATE TABLE mkm_attendance.queue_events (
+migrations\001_machine_integration.sql:62:    queue_id BIGINT NOT NULL REFERENCES mkm_attendance.integration_queue(id),
+migrations\001_machine_integration.sql:63:    raw_event_id BIGINT NOT NULL UNIQUE REFERENCES mkm_attendance.attendance_raw_events(id),
+migrations\permissions.mysql.example.sql:6:GRANT SELECT ON mkm_attendance_local.* TO mkm_attendance_reader;
+migrations\permissions.mysql.example.sql:7:GRANT SELECT ON mkm_attendance_local.schema_version TO mkm_attendance_receiver;
+migrations\permissions.mysql.example.sql:8:GRANT SELECT,INSERT ON mkm_attendance_local.attendance_raw_events TO mkm_attendance_receiver;
+migrations\permissions.mysql.example.sql:9:GRANT SELECT ON mkm_attendance_local.* TO mkm_attendance_worker;
+migrations\permissions.mysql.example.sql:10:GRANT INSERT,UPDATE ON mkm_attendance_local.integration_queue TO mkm_attendance_worker;
+migrations\permissions.mysql.example.sql:11:GRANT INSERT ON mkm_attendance_local.queue_events TO mkm_attendance_worker;
+migrations\permissions.mysql.example.sql:12:GRANT INSERT,UPDATE ON mkm_attendance_local.attendances TO mkm_attendance_worker;
+migrations\permissions.mysql.example.sql:13:GRANT INSERT,DELETE ON mkm_attendance_local.attendance_sources TO mkm_attendance_worker;
+migrations\permissions.mysql.example.sql:14:GRANT INSERT ON mkm_attendance_local.attendance_processing_errors TO mkm_attendance_worker;
+migrations\permissions.mysql.example.sql:15:GRANT SELECT,INSERT,UPDATE ON mkm_attendance_local.integration_settings TO mkm_attendance_settings;
+migrations\permissions.mysql.example.sql:16:GRANT INSERT ON mkm_attendance_local.integration_settings_audit TO mkm_attendance_settings;
+migrations\permissions.attendance-engine-upgrade.pgsql.example.sql:3:GRANT SELECT ON mkm_attendance.attendance_shift_assignments,mkm_attendance.attendance_work_calendar,
+migrations\permissions.attendance-engine-upgrade.pgsql.example.sql:7:GRANT INSERT,UPDATE ON mkm_attendance.attendances TO mkm_attendance_worker;
+migrations\permissions.attendance-engine-upgrade.pgsql.example.sql:8:GRANT INSERT,DELETE ON mkm_attendance.attendance_sources TO mkm_attendance_worker;
+migrations\permissions.attendance-engine-upgrade.pgsql.example.sql:9:GRANT INSERT ON mkm_attendance.attendance_processing_errors TO mkm_attendance_worker;
+migrations\permissions.attendance-engine-upgrade.pgsql.example.sql:10:GRANT USAGE,SELECT ON SEQUENCE mkm_attendance.attendances_id_seq,mkm_attendance.attendance_processing_errors_id_seq TO mkm_attendance_worker;
+migrations\003_attendance_engine.sql:1:ALTER TABLE mkm_attendance.shifts
+migrations\003_attendance_engine.sql:8:CREATE TABLE mkm_attendance.attendance_shift_assignments (
+migrations\003_attendance_engine.sql:12: FOREIGN KEY (shift_code) REFERENCES mkm_attendance.shifts(code)
+migrations\003_attendance_engine.sql:14:CREATE TABLE mkm_attendance.attendance_work_calendar (
+migrations\003_attendance_engine.sql:19:CREATE TABLE mkm_attendance.attendance_statuses (
+migrations\003_attendance_engine.sql:23:CREATE TABLE mkm_attendance.attendance_requests (
+migrations\003_attendance_engine.sql:28:CREATE TABLE mkm_attendance.attendance_period_locks (
+migrations\003_attendance_engine.sql:33:CREATE TABLE mkm_attendance.attendances (
+migrations\003_attendance_engine.sql:44: CONSTRAINT attendance_employee_date UNIQUE (employee_nik,attendance_date), FOREIGN KEY (approved_request_id) REFERENCES mkm_attendance.attendance_requests(id)
+migrations\003_attendance_engine.sql:46:CREATE TABLE mkm_attendance.attendance_sources (
+migrations\003_attendance_engine.sql:48: PRIMARY KEY (attendance_id,raw_event_id), FOREIGN KEY (attendance_id) REFERENCES mkm_attendance.attendances(id),
+migrations\003_attendance_engine.sql:49: FOREIGN KEY (raw_event_id) REFERENCES mkm_attendance.attendance_raw_events(id)
+migrations\003_attendance_engine.sql:51:CREATE TABLE mkm_attendance.attendance_processing_errors (
+migrations\002_integration_credentials.sql:1:CREATE TABLE mkm_attendance.integration_settings (
+migrations\002_integration_credentials.sql:10:CREATE TABLE mkm_attendance.integration_settings_audit (
+migrations\permissions.example.sql:9:GRANT SELECT ON ALL TABLES IN SCHEMA mkm_attendance TO mkm_attendance_reader, mkm_attendance_worker;
+migrations\permissions.example.sql:10:GRANT SELECT ON mkm_attendance.schema_version, mkm_attendance.attendance_raw_events TO mkm_attendance_receiver;
+migrations\permissions.example.sql:11:GRANT INSERT ON mkm_attendance.attendance_raw_events TO mkm_attendance_receiver;
+migrations\permissions.example.sql:12:GRANT USAGE, SELECT ON SEQUENCE mkm_attendance.attendance_raw_events_id_seq TO mkm_attendance_receiver;
+migrations\permissions.example.sql:13:GRANT INSERT, UPDATE ON mkm_attendance.integration_queue TO mkm_attendance_worker;
+migrations\permissions.example.sql:14:GRANT INSERT ON mkm_attendance.queue_events TO mkm_attendance_worker;
+migrations\permissions.example.sql:15:GRANT USAGE, SELECT ON SEQUENCE mkm_attendance.integration_queue_id_seq TO mkm_attendance_worker;
+migrations\permissions.example.sql:16:GRANT INSERT,UPDATE ON mkm_attendance.attendances TO mkm_attendance_worker;
+migrations\permissions.example.sql:17:GRANT INSERT,DELETE ON mkm_attendance.attendance_sources TO mkm_attendance_worker;
+migrations\permissions.example.sql:18:GRANT INSERT ON mkm_attendance.attendance_processing_errors TO mkm_attendance_worker;
+migrations\permissions.example.sql:19:GRANT USAGE,SELECT ON SEQUENCE mkm_attendance.attendances_id_seq,mkm_attendance.attendance_processing_errors_id_seq TO mkm_attendance_worker;
+migrations\permissions.example.sql:21:GRANT SELECT ON mkm_attendance.integration_settings TO mkm_attendance_reader,mkm_attendance_worker;
+migrations\permissions.example.sql:22:GRANT SELECT,INSERT,UPDATE ON mkm_attendance.integration_settings TO mkm_attendance_settings;
+migrations\permissions.example.sql:23:GRANT INSERT ON mkm_attendance.integration_settings_audit TO mkm_attendance_settings;
+migrations\permissions.example.sql:24:GRANT USAGE,SELECT ON SEQUENCE mkm_attendance.integration_settings_audit_id_seq TO mkm_attendance_settings;

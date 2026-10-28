@@ -1,0 +1,6 @@
+{
+ "code":"LATE",
+ "condition_key":"late",
+ "label":"Late arrival",
+ "priority":50
+}

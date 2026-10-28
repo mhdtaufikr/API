@@ -1,0 +1,10 @@
+{
+    "card_number": "REPLACE_WITH_VERIFIED_CARD",
+    "employee_nik": "REPLACE_WITH_TEST_NIK",
+    "employee_name": "REPLACE_WITH_EMPLOYEE_NAME",
+    "talenta_employee_id": null,
+    "talenta_user_id": null,
+    "badge_number": null,
+    "shift_code": null,
+    "verified": false
+}

@@ -1,0 +1,11 @@
+{
+    "code": "EXAMPLE_DAY",
+    "timezone": "Asia/Jakarta",
+    "start_time": "07:30",
+    "end_time": "16:30",
+    "weekdays": [1, 2, 3, 4, 5],
+    "in_before_minutes": 30,
+    "in_after_minutes": 30,
+    "out_before_minutes": 30,
+    "out_after_minutes": 30
+}

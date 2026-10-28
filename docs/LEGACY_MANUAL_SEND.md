@@ -1,0 +1,34 @@
+# Kirim satu item / semua item pada filter
+
+Data Absensi sekarang menyediakan `Kirim item ini` pada setiap tuple unik dengan FlFlag=0, serta `Kirim semua pada filter ini`. Semua berarti hanya tanggal/kartu pada filter yang sedang dilihat, maksimal 1000 baris; bukan seluruh database. Tidak ada request API saat membuka daftar atau preview.
+
+Halaman review menampilkan jumlah, timestamp asli, terminal, kode arah mentah, CSV, serta blocker. POST final membutuhkan CSRF, nonce preview 10 menit, hash data/config yang diperiksa ulang, checkbox dan teks `KIRIM 2120`. Trial tetap satu kartu 2120. Tidak menunggu scheduler; tidak mengaktifkan scheduler.
+
+## Konfigurasi sebelum live
+
+- Salin `config/legacy-trial-map.example.json` menjadi `config/legacy-trial-map.json`; isi kartu/NIK/user/badge berdasarkan verifikasi Talenta dan set verified=true setelah cocok. NIK dan User ID harus sama dengan ATTENDANCE_TEST_NIK/TALENTA_USER_ID di .env. Kartu tidak otomatis dianggap badge/NIK.
+- Verifikasi config/contract.json terhadap profil CSV Import Token. Profil aktif saat implementasi masih contoh 2 kolom, belum dianggap profil legacy enam kolom yang siap kirim.
+- Source CSV yang tersedia: date/time sesuai format terverifikasi, badge, raw_direction (nilai FcDirection asli), terminal (FcTermNo), flag (FlFlag asli), literal. Nilai FcDirection=1 dipertahankan; tidak diinferensikan IN/OUT. Profil yang membutuhkan IN/OUT ditahan selama arti kode belum diketahui.
+- Setelah review, TALENTA_CSV_PROFILE_CONFIRMED=true, TALENTA_LEGACY_RAW_CONFIRMED=true, DRY_RUN=false, ALLOW_PRODUCTION_WRITE=true, credentials/user/NIK lengkap. Jangan mengaktifkan semua flag hanya untuk melewati blocker.
+
+## Status dan kegagalan
+
+`Mekari::submit` menyimpan reservation di ledger sebelum network, dengan TLS/HMAC dan multipart user_id/token/file. HTTP non-2xx, transport error atau JSON error eksplisit tidak memperbarui FlFlag. Tidak ada retry otomatis. HTTP 2xx tanpa error eksplisit berarti diterima API, **bukan** import selesai. Sesuai aturan user, sumber unik kemudian ditandai FlFlag=1, dan hasil API tetap submitted_pending_reconciliation. Cek hasil di Talenta.
+
+Update flag memeriksa seluruh field event (tanggal, waktu, kartu, arah, terminal) dan FlFlag=0 di transaksi. Exactly one row required; lebih dari satu/berubah berarti rollback. MySQL memerlukan InnoDB. Jika API sudah menerima tetapi flag gagal diperbarui, ledger tetap menahan retry; lakukan rekonsiliasi, bukan reset ledger. Duplikat fisik tidak dihapus atau digabung. Batch tidak dikurangi diam-diam bila ada satu item invalid/ambigu.
+
+Ledger dan lock berada di storage privat, bukan tabel tambahan. Deployment ini **satu instance aplikasi dengan storage persisten**; jangan jalankan host lain dengan ledger terpisah untuk data yang sama, dan jangan menjalankan sender legacy lama bersamaan. Backup ledger bersama DB/.env sebelum pemindahan. Identitas tuple tidak bisa membuktikan identitas fisik baris tanpa PK; baris ambigu ditahan untuk review. Jangan menghapus ledger untuk memaksa resend.
+
+## Pemeriksaan
+
+- tests/legacy-manual-send.php: 10 offline checks passed, individual/all pending selection, ambiguity/other-card/previous-sent guards, raw code preservation, unknown IN/OUT contract rejection, live default locked.
+- tests/legacy-flag-local.php: 4 checks passed with isolated fixture rows inside a rolled-back transaction, exact row update, already-marked refusal, ambiguous tuple refusal, original rows unchanged.
+- Existing offline/CSV and four-table local checks passed. List/review pages HTTP 200. No actual import sent and original FlFlag values not changed during validation.
+
+End-to-end live API acceptance and PostgreSQL flag updates remain unverified. All configuration/live flags remained off during this implementation.
+
+Trial setup repair (27 October 2026): GET employment-info reverified employee_id=2120, company=11423, user ID=2371526, barcode=2120; mapping file and matching trial identity env values populated without changing live gates. Legacy Downloads/API CSV files contain only the six-column header (53 bytes), no data examples; date/time formats remain operator-confirmed through the new setup form. Preview now shows draft raw six-column CSV. Setup POST requires CSRF, nonce, typed AKTIFKAN 2120 and explicit profile approval; it backs up config/.env, sets manual live gates for reviewed card, keeps scheduler disabled, then redirects to a fresh final preview without sending. Final POST still requires KIRIM 2120 and batch confirmation. Setup activation and real import were not executed during validation. Five setup tests passed; existing ten manual-send and nine four-table checks passed.
+
+PROFILE CORRECTION from user screenshot (27 October 2026): company Machine profile CSV API has Barcode column 1, Date column 2, Time column 2, Starting Row 2, comma CSV, Multiple Row, date d/m/Y and 24-hour seconds, Range selected. Active contract is now two columns badgeno,checktime with combined d/m/Y H:i:s. Six-column draft was superseded, not used for live requests. Range values are recorded in contract metadata only; local code does not invent IN/OUT. Local FlFlag is not the Talenta classification flag and is not exported. Existing company profile was read from user evidence, never changed. Identity mapping verified from official employment-info. Manual card-2120 live gates activated using prior explicit manual-trial authorization after profile verification; scheduler stays disabled, final per-batch typed confirmation/CSRF remains mandatory. No API import request was made by the agent. GET preview verified final button enabled and correct timestamps; offline tests force DRY_RUN=true during checks. .env/contract backups saved before activation under private storage.
+
+CRITICAL TOKEN-PROFILE CORRECTION (27 October 2026): User confirms the configured Import Token belongs to Attendance MKM, not CSV API. Screenshot shows DATE column 1 Y-m-d, TIME column 2 H:i:s (24h), BARCODE column 3, comma CSV, Starting Row 2, Multiple Row, Range with all four windows=240 minutes, day-off enabled. Active six-column legacy format is Date,Time,Employee_ID,Direction,Terminal_Number,Flag; e.g. 2026-10-27,07:20:00,2120,1,004,0. Previous two-column CSV API setting was wrong for this token. Contract backed up before replacement. Setup validator/tests/UI corrected to Attendance MKM. No prior flag/ledger entry cleared and no import resent. While checking, all three current raw rows were already marked sent by user requests, so all-pending preview correctly reports no item FlFlag=0. Future requests log profile/csv/contract hashes, safe request references and encrypted response body (AES-GCM, APP_KEY) for diagnostics, without exposing raw response to browser. Actual successful import still needs reconciliation; correcting the format alone is not proof of remote acceptance/application.

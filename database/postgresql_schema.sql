@@ -1,0 +1,22 @@
+-- LOCAL ISOLATED COPY ONLY. Never execute on production. No PK/unique added.
+CREATE TABLE public.tbl_rawdata (
+ "FdDate" DATE DEFAULT NULL,
+ "FcTime" TIME(0) DEFAULT NULL,
+ "FcCardNo" VARCHAR(50) DEFAULT NULL,
+ "FcDirection" VARCHAR(1) DEFAULT NULL,
+ "FcTermNo" VARCHAR(3) DEFAULT NULL,
+ "FlFlag" SMALLINT DEFAULT NULL
+);
+CREATE TABLE public.tbl_absen (
+ "FdDate" TIMESTAMP(0) WITHOUT TIME ZONE DEFAULT NULL,
+ "FcCardNo" VARCHAR(50) DEFAULT NULL,
+ "FcDirection" VARCHAR(1) DEFAULT NULL,
+ "FcTermNo" VARCHAR(3) DEFAULT NULL
+);
+CREATE TABLE public.tbl_log (
+ "FdDateTime" TIMESTAMP(0) WITHOUT TIME ZONE DEFAULT NULL,
+ "FcMessage" VARCHAR(80) DEFAULT NULL
+);
+
+CREATE TABLE public.tbl_config (provider VARCHAR(30) PRIMARY KEY,client_id_encrypted TEXT NULL,client_secret_encrypted TEXT NULL,import_token_encrypted TEXT NULL,revision BIGINT NOT NULL DEFAULT 1,audit_history JSONB NOT NULL,created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
+COMMENT ON TABLE public.tbl_config IS 'mkm-talenta-config-v1';

@@ -1,0 +1,18 @@
+Require all granted
+
+DirectoryIndex index.php
+
+# Only machine receiver is accessible remotely
+
+<Files "index.php">
+Require all granted
+</Files>
+
+Options -Indexes
+
+<FilesMatch "^(\.env._|._\.(json|sqlite|log|md|bat|cmd|ps1))$">
+Require all denied
+</FilesMatch>
+
+RewriteEngine On
+RewriteRule ^(?:app|config|storage|bin|tests|migrations)(?:/|$) - [F,L]

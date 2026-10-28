@@ -1,0 +1,4 @@
+# The stateless receiver enforces MACHINE_ALLOWED_IPS using REMOTE_ADDR in PHP.
+# Dashboard/simulator keep localhost-only access separately.
+Require all granted
+Options -Indexes

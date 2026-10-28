@@ -1,0 +1,9 @@
+{
+ "code":"EXAMPLE_DAY",
+ "late_grace_minutes":0,
+ "early_leave_grace_minutes":0,
+ "duplicate_tap_seconds":0,
+ "window_fallback_enabled":false,
+ "minute_rounding":"floor",
+ "grace_mode":"threshold"
+}

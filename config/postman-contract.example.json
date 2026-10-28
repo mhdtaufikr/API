@@ -1,0 +1,8 @@
+{
+    "fields": {"user_id": "user_id", "token": "import_token", "file": "csv"},
+    "csv_spec_reference": "Workspace official collection: Submit Attendance Import Fingerprint, section B. Example only: verify mapped badge_number and the configured Talenta CSV profile before enabling TALENTA_CSV_PROFILE_CONFIRMED.",
+    "csv_columns": {
+        "badgeno": {"source": "badge"},
+        "checktime": {"source": "checktime", "format": "d/m/Y H:i"}
+    }
+}

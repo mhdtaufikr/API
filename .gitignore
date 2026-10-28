@@ -1,0 +1,15 @@
+.env
+.env-*
+!.env.example
+!.env.*.example
+/storage/*
+!/storage/.htaccess
+/config/source.json
+/config/contract.json
+/config/receiver-response.json
+/config/legacy-trial-map.json
+
+/.runtime-php74/
+/*.postman_collection.json
+*.log
+

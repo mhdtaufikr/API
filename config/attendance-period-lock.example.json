@@ -1,0 +1,7 @@
+{
+ "employee_nik":null,
+ "from_date":"2026-10-01",
+ "to_date":"2026-10-31",
+ "locked":true,
+ "reason":"EXAMPLE ONLY - replace with an authorized locked-period reason"
+}

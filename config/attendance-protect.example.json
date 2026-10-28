@@ -1,0 +1,6 @@
+{
+ "employee_nik":"REPLACE_WITH_REAL_NIK",
+ "attendance_date":"2026-10-27",
+ "reason":"REPLACE_WITH_AUTHORIZED_HR_CORRECTION_REFERENCE",
+ "values":{"final_attendance_status":"PRESENT"}
+}

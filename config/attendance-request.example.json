@@ -1,0 +1,7 @@
+{
+ "reference":"REPLACE_WITH_APPROVED_HR_REQUEST_REFERENCE",
+ "employee_nik":"REPLACE_WITH_REAL_NIK",
+ "attendance_date":"2026-10-27",
+ "state":"approved",
+ "approved_values":{"final_attendance_status":"PRESENT"}
+}

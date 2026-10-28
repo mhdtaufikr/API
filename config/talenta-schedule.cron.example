@@ -1,0 +1,4 @@
+# Install on a cron implementation supporting CRON_TZ, with the verified production paths.
+# Leave commented until the profile, timezone and CLI network/CA configuration are verified.
+# CRON_TZ=Asia/Jakarta
+# 0 8,12,18 * * * cd /path/to/API && /usr/bin/php bin/console.php talenta:scheduler >> storage/scheduler-console.log 2>&1
