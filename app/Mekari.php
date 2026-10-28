@@ -4,6 +4,7 @@ declare (strict_types=1);
 final class Mekari
 {
     public const PATH = '/v2/talenta/v2/attendance/import-fingerprint';
+    private const PACKAGED_CONTRACT_SHA256 = '3a547c6fb4acf32decc07032ace6d999db379b95f0bd40f9cfd981ccb6677239';
     public static function authorization(string $date, string $id, string $secret): string
     {
         return self::signRequest($date, $id, $secret, 'POST', self::PATH);
@@ -15,10 +16,31 @@ final class Mekari
     }
     public static function contract(): array
     {
-        $contract = jsonFile(ROOT . '/config/contract.json');
-        $collection = ROOT . '/storage/postman.json';
-        if (!is_file($collection) || !hash_equals($contract['collection_sha256'] ?? '', hash_file('sha256', $collection))) {
-            compat_throw(new RuntimeException('Postman evidence is missing or changed.'));
+        return self::loadContract(
+            ROOT . '/config/contract.json',
+            ROOT . '/storage/postman.json',
+            ROOT . '/config/talenta-attendance-contract.json'
+        );
+    }
+    private static function loadContract(string $runtimeContract, string $collection, string $packaged): array
+    {
+        if (is_file($runtimeContract) || is_file($collection)) {
+            if (!is_file($runtimeContract) || !is_file($collection)) {
+                compat_throw(new RuntimeException('Runtime contract and Postman evidence must be deployed together.'));
+            }
+            $contract = jsonFile($runtimeContract);
+            if (!hash_equals($contract['collection_sha256'] ?? '', hash_file('sha256', $collection))) {
+                compat_throw(new RuntimeException('Postman evidence is missing or changed.'));
+            }
+        } else {
+            if (!is_file($packaged)) {
+                compat_throw(new RuntimeException('Packaged Attendance MKM contract is missing or changed.'));
+            }
+            $contract = jsonFile($packaged);
+            $fingerprint = hash('sha256', json_encode($contract, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+            if (!hash_equals(self::PACKAGED_CONTRACT_SHA256, $fingerprint)) {
+                compat_throw(new RuntimeException('Packaged Attendance MKM contract is missing or changed.'));
+            }
         }
         if (($contract['method'] ?? '') !== 'POST' || ($contract['path'] ?? '') !== self::PATH || ($contract['mode'] ?? '') !== 'formdata') {
             compat_throw(new RuntimeException('Only verified multipart fingerprint imports are supported.'));

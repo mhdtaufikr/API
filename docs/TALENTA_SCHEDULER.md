@@ -30,6 +30,8 @@ Code, scheduler preview, Windows task installer and cron example are prepared. *
 
 When `INTEGRATION_STORAGE=legacy_app`, the same `talenta:scheduler` command now uses the legacy dispatcher instead of generated integration tables. It partitions the configured lookback into bounded daily batches, selects `tbl_rawdata` rows with `FlFlag=0`, validates every distinct card against Talenta, builds each verified Attendance MKM CSV in memory/temporary multipart storage, uses the existing ledger to block repeated attempts, and updates the exact source tuples to `FlFlag=1` only after HTTP acceptance. Ambiguous identical tuples, invalid identities, profile mismatches, rejected/unknown outcomes and flag-update failures remain held for reconciliation.
 
+The reviewed Attendance MKM contract is packaged without credentials so a clean Git deployment can pass the contract gate. A deployment may still provide the older private `config/contract.json` plus matching `storage/postman.json`; both runtime files must exist together and retain their reviewed hash. Partial or changed runtime evidence remains blocked.
+
 No new database migration is needed; scheduled batches use the existing integration queue. The new status panel on the dashboard shows the three WIB slots and whether automatic submission is enabled.
 
 ## Review and activation

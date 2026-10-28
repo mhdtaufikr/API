@@ -1,0 +1,52 @@
+{
+    "fields": {
+        "user_id": "user_id",
+        "token": "import_token",
+        "file": "csv"
+    },
+    "csv_spec_reference": "Reviewed Attendance MKM machine profile: date column 1 Y-m-d, time column 2 H:i:s, barcode column 3, starting row 2, Multiple Row comma CSV, Range 240 minutes. The official Talenta collection verifies the multipart endpoint and user_id, token, file fields.",
+    "csv_columns": {
+        "Date": {
+            "format": "Y-m-d",
+            "source": "date"
+        },
+        "Time": {
+            "format": "H:i:s",
+            "source": "time"
+        },
+        "Employee_ID": {
+            "source": "badge"
+        },
+        "Direction": {
+            "source": "raw_direction"
+        },
+        "Terminal_Number": {
+            "source": "terminal"
+        },
+        "Flag": {
+            "source": "flag"
+        }
+    },
+    "method": "POST",
+    "path": "/v2/talenta/v2/attendance/import-fingerprint",
+    "mode": "formdata",
+    "attendance_machine_profile": {
+        "name": "Attendance MKM",
+        "set": "multiple_row",
+        "starting_row": 2,
+        "file_type": "CSV",
+        "delimiter": ",",
+        "barcode_column": 3,
+        "date_column": 1,
+        "time_column": 2,
+        "date_format": "Y-m-d",
+        "time_format": "H:i:s",
+        "classification": "Range",
+        "in_after_minutes": 240,
+        "in_before_minutes": 240,
+        "out_after_minutes": 240,
+        "out_before_minutes": 240,
+        "include_day_off": true,
+        "verified_source": "Operator-reviewed Attendance MKM profile and official Talenta Data API collection, 2026-10-27"
+    }
+}
