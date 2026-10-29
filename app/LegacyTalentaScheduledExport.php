@@ -42,10 +42,12 @@ final class LegacyTalentaScheduledExport
         $days = filter_var(env('TALENTA_SCHEDULE_LOOKBACK_DAYS', '3'), FILTER_VALIDATE_INT);
         $employeeBatch = filter_var(env('TALENTA_SCHEDULE_EMPLOYEE_BATCH_SIZE', '25'), FILTER_VALIDATE_INT);
         $rowBatch = filter_var(env('TALENTA_SCHEDULE_ROW_BATCH_SIZE', '500'), FILTER_VALIDATE_INT);
+        $maxSubmissions = filter_var(env('TALENTA_SCHEDULE_MAX_SUBMISSIONS', '4'), FILTER_VALIDATE_INT);
         if ($window === false || $window < 1 || $window > 59
             || $days === false || $days < 1 || $days > 7
             || $employeeBatch === false || $employeeBatch < 1 || $employeeBatch > 100
-            || $rowBatch === false || $rowBatch < 1 || $rowBatch > 1000) {
+            || $rowBatch === false || $rowBatch < 1 || $rowBatch > 1000
+            || $maxSubmissions === false || $maxSubmissions < 1 || $maxSubmissions > 4) {
             compat_throw(new RuntimeException('Invalid scheduler window, lookback or batch configuration.'));
         }
 
@@ -60,11 +62,13 @@ final class LegacyTalentaScheduledExport
             'status' => 'preview',
             'employee_batch_size' => $employeeBatch,
             'row_batch_size' => $rowBatch,
+            'max_submissions_per_run' => $maxSubmissions,
             'total_pending_records' => 0,
             'total_unique_employees' => 0,
             'batches_created' => 0,
             'batches_submitted' => 0,
             'batches_failed' => 0,
+            'batches_deferred' => 0,
             'batches_held' => 0,
             'flags_updated' => 0,
             'records_skipped' => 0,
@@ -73,6 +77,7 @@ final class LegacyTalentaScheduledExport
             'events_skipped' => 0,
             'cards_skipped' => 0,
             'errors' => 0,
+            'dispatch_stopped' => false,
         ];
         if (!$preview && !enabled('TALENTA_SCHEDULER_ENABLED')) {
             return $this->finish($summary, ['status' => 'disabled', 'reason' => 'Scheduler disabled']);
@@ -143,6 +148,10 @@ final class LegacyTalentaScheduledExport
                 if (empty($plan['events']) || $preview) {
                     continue;
                 }
+                if ($summary['batches_submitted'] >= $maxSubmissions) {
+                    $summary['dispatch_stopped'] = true;
+                    break;
+                }
 
                 try {
                     $result = ($this->sender)($scope, (string) $plan['hash']);
@@ -168,6 +177,11 @@ final class LegacyTalentaScheduledExport
                         $heldBatches[$batchKey] = true;
                         $summary['errors']++;
                     }
+                } elseif ($resultStatus === 'deferred_retryable') {
+                    $summary['batches_deferred']++;
+                    $heldBatches[$batchKey] = true;
+                    $summary['dispatch_stopped'] = true;
+                    break;
                 } elseif (in_array($resultStatus, ['unknown', 'reserved'], true)) {
                     $heldBatches[$batchKey] = true;
                     $summary['errors']++;
@@ -181,8 +195,13 @@ final class LegacyTalentaScheduledExport
             $summary['batches_held'] = count($heldBatches);
             $summary['batches_failed'] = count($failedBatches);
             $changes = $this->finalStatus($summary);
-            if (!$preview && $summary['total_pending_records'] > 0 && $summary['batches_submitted'] === 0 && $summary['errors'] === 0) {
+            if (!$preview && $summary['total_pending_records'] > 0 && $summary['batches_submitted'] === 0 && $summary['errors'] === 0 && $summary['batches_deferred'] === 0) {
                 $changes['errors'] = 1;
+            }
+            if ($summary['dispatch_stopped']) {
+                $changes['reason'] = $summary['batches_deferred'] > 0
+                    ? 'Talenta sedang memproses export/import lain; batch tersisa ditunda hingga run berikutnya.'
+                    : 'Batas aman submission per run tercapai; batch tersisa tetap pending untuk run berikutnya.';
             }
             if ($lastHttp !== null) {
                 $changes['http'] = $lastHttp;
@@ -220,7 +239,7 @@ final class LegacyTalentaScheduledExport
             return ['status' => 'no_pending'];
         }
         if ($summary['batches_submitted'] > 0) {
-            if ($summary['batches_failed'] > 0 || $summary['batches_held'] > 0 || $summary['errors'] > 0) {
+            if ($summary['batches_failed'] > 0 || $summary['batches_held'] > 0 || $summary['errors'] > 0 || $summary['dispatch_stopped']) {
                 return ['status' => 'partially_completed'];
             }
             return ['status' => $summary['records_skipped'] > 0 ? 'completed_with_skips' : 'completed'];

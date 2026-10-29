@@ -113,6 +113,9 @@ final class Mekari
     {
         $attempted = [];
         foreach ($ledger ?? self::logs() as $entry) {
+            if (!self::ledgerEntryBlocksRetry($entry)) {
+                continue;
+            }
             foreach ($entry['event_keys'] ?? [] as $key) {
                 if (is_string($key) && preg_match('/\A[a-f0-9]{64}\z/', $key)) {
                     $attempted[$key] = true;
@@ -120,6 +123,39 @@ final class Mekari
             }
         }
         return $attempted;
+    }
+    public static function retryableConcurrencyResponse($response, int $httpCode): bool
+    {
+        if ($httpCode !== 400 || !is_string($response)) {
+            return false;
+        }
+        $decoded = json_decode($response, true);
+        if (!is_array($decoded) || !is_array($decoded['errors'] ?? null)) {
+            return false;
+        }
+        foreach ($decoded['errors'] as $error) {
+            if (is_string($error) && strtolower(trim($error)) === 'there is another export or import process going on, please retry later') {
+                return true;
+            }
+        }
+        return false;
+    }
+    public static function ledgerEntryBlocksRetry(array $entry): bool
+    {
+        if (($entry['status'] ?? '') === 'deferred_retryable') {
+            return false;
+        }
+        if (($entry['status'] ?? '') !== 'rejected'
+            || (int) ($entry['http'] ?? 0) !== 400
+            || !is_string($entry['response_encrypted'] ?? null)) {
+            return true;
+        }
+        try {
+            $response = (new CredentialCipher(env('APP_KEY')))->decrypt($entry['response_encrypted'], 'MEKARI_IMPORT_RESPONSE');
+            return !self::retryableConcurrencyResponse($response, 400);
+        } catch (Throwable $_unreadable) {
+            return true;
+        }
     }
     private static function writeLedger($f, array $ledger): void
     {
@@ -164,6 +200,9 @@ final class Mekari
         if (!is_string($response)) {
             return 'unknown';
         }
+        if (self::retryableConcurrencyResponse($response, $httpCode)) {
+            return 'deferred_retryable';
+        }
         if ($httpCode < 200 || $httpCode >= 300) {
             return 'rejected';
         }
@@ -207,7 +246,7 @@ final class Mekari
         try {
             $ledger = is_file(ROOT . '/storage/ledger.json') ? jsonFile(ROOT . '/storage/ledger.json') : [];
             foreach ($ledger as $entry) {
-                if (array_intersect($keys, $entry['event_keys'])) {
+                if (self::ledgerEntryBlocksRetry($entry) && array_intersect($keys, $entry['event_keys'] ?? [])) {
                     compat_throw(new RuntimeException('Previously attempted events blocked. Reconcile with Talenta before any manual retry.'));
                 }
             }
@@ -246,6 +285,9 @@ final class Mekari
             $entry['http'] = $code;
             $entry['reference'] = is_string($response) ? self::responseReference($response) : [];
             $entry['status'] = self::submissionStatus($response, $code);
+            if ($entry['status'] === 'deferred_retryable') {
+                $entry['deferred_reason'] = 'talenta_import_export_busy';
+            }
             // Preserve diagnostics encrypted, never expose arbitrary remote text/credential echoes.
             if ($reviewedLegacy && is_string($response) && strlen($response) <= 4 * 1024 * 1024) {
                 try {
@@ -254,7 +296,11 @@ final class Mekari
                     $entry['diagnostic_warning'] = 'Encrypted response retention failed; retain reservation and reconcile using request references.';
                 }
             }
-            $entry['response'] = $response === false ? 'Transport failure; remote outcome unknown.' : 'HTTP ' . $code . '; response SHA256 ' . hash('sha256', $response) . '; reconcile import in Talenta.';
+            $entry['response'] = $response === false
+                ? 'Transport failure; remote outcome unknown.'
+                : ($entry['status'] === 'deferred_retryable'
+                    ? 'HTTP 400; Talenta import/export busy; retry deferred to a later scheduler run; response SHA256 ' . hash('sha256', $response) . '.'
+                    : 'HTTP ' . $code . '; response SHA256 ' . hash('sha256', $response) . '; reconcile import in Talenta.');
             $ledger[array_key_last($ledger)] = $entry;
             self::writeLedger($f, $ledger);
             return $entry;

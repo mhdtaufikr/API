@@ -6,6 +6,7 @@ putenv('INTEGRATION_STORAGE=legacy_app');
 putenv('TALENTA_SCHEDULER_ENABLED=true');
 putenv('TALENTA_SCHEDULE_EMPLOYEE_BATCH_SIZE=25');
 putenv('TALENTA_SCHEDULE_ROW_BATCH_SIZE=500');
+putenv('TALENTA_SCHEDULE_MAX_SUBMISSIONS=4');
 require __DIR__ . '/../app/bootstrap.php';
 
 $checks = 0;
@@ -80,12 +81,27 @@ $outside = $scheduler->run(false, new DateTimeImmutable('2026-10-29T13:00:00+07:
 legacySchedulerCheck($outside['status'] === 'outside_schedule' && !$sent, 'No-argument scheduled mode still enforces the existing time windows');
 
 $completed = $scheduler->run(false, new DateTimeImmutable('2026-10-29T13:00:00+07:00'), true);
-legacySchedulerCheck($completed['status'] === 'completed' && $completed['batches_submitted'] === 10 && $completed['flags_updated'] === 1250 && count($sent) === 10, 'All 1,250 eligible records are processed across ten batches');
-legacySchedulerCheck(count(array_unique($sent)) === 10, 'No batch is submitted twice in one run');
+legacySchedulerCheck($completed['status'] === 'partially_completed' && $completed['batches_submitted'] === 4 && $completed['flags_updated'] === 500 && $completed['dispatch_stopped'] === true, 'One run stops at the safe four-import queue limit');
+legacySchedulerCheck(count(array_unique($sent)) === 4, 'No batch is submitted twice in one run');
 
 // Test 4: a second run sees no rows whose successful flag updates were confirmed.
 $second = $scheduler->run(false, new DateTimeImmutable('2026-10-29T13:01:00+07:00'), true);
-legacySchedulerCheck($second['status'] === 'no_pending' && $second['batches_submitted'] === 0 && count($sent) === 10, 'A subsequent run does not resubmit successfully processed records');
+legacySchedulerCheck($second['status'] === 'partially_completed' && $second['batches_submitted'] === 4 && count($sent) === 8, 'A subsequent run resumes remaining batches without resubmitting successful records');
+$third = $scheduler->run(false, new DateTimeImmutable('2026-10-29T13:02:00+07:00'), true);
+legacySchedulerCheck($third['status'] === 'completed' && $third['batches_submitted'] === 2 && count($sent) === 10, 'Remaining batches finish on a later run within the safe queue limit');
+
+$deferredAttempts = [];
+$deferred = new LegacyTalentaScheduledExport(
+    static fn(array $scope): array => fakePlan($scope),
+    static function (array $scope) use (&$deferredAttempts): array {
+        $deferredAttempts[] = $scope['id'];
+        return ['status' => 'deferred_retryable', 'flag_updated' => false, 'http' => 400, 'id' => 'BUSY-' . $scope['id']];
+    },
+    static function (array $summary): void {},
+    static fn(): iterable => [fakeScope(1, 1, 1, 1), fakeScope(2, 2, 1, 1)]
+);
+$deferredResult = $deferred->run(false, new DateTimeImmutable('2026-10-29T13:01:30+07:00'), true);
+legacySchedulerCheck($deferredResult['status'] === 'held' && $deferredResult['batches_deferred'] === 1 && $deferredResult['errors'] === 0 && $deferredResult['dispatch_stopped'] === true && $deferredAttempts === ['batch-1'], 'Talenta concurrency response defers one batch and stops later submissions without flag updates');
 
 // Test 3: one rejected API batch does not discard or prevent later independent batches.
 $partialScopes = [fakeScope(1, 1, 1, 1), fakeScope(2, 2, 1, 1), fakeScope(3, 3, 1, 1)];

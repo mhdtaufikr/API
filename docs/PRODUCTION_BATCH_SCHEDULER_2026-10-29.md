@@ -97,3 +97,17 @@ ORDER BY FlFlag;
 7. For an unknown transport outcome or accepted request whose flag update failed, do not retry and do not clear the ledger. Reconcile the request in Talenta first.
 
 No live production submission is part of the automated validation for this change.
+
+## Confirmed Talenta HTTP 400 follow-up
+
+The 29 October 08:00 WIB production run created 11 import requests. Five were accepted before six consecutive requests were rejected with HTTP 400. The encrypted response retained for all six rejected ledger entries contained the same error:
+
+```text
+there is another export or import process going on, please retry later
+```
+
+This confirms Talenta import/export concurrency as the cause. It was not a CSV-column, card-number, employee-identity or payload-size rejection. Lower card numbers appeared successful because scheduler scopes are ordered by `FcCardNo`; they occupied the earlier accepted batches.
+
+The follow-up protection limits one scheduler execution to at most four submissions. If Talenta returns the exact concurrency response sooner, the current batch becomes `deferred_retryable`, remains `FlFlag=0`, and stops the rest of the run. The next run may resume that exact batch. Other rejections, transport failures and unknown responses retain the original permanent ledger hold.
+
+The six historical HTTP 400 entries do not need to be deleted or manually edited. Their encrypted exact responses make only those event reservations retryable after this code is deployed. Preserve `APP_KEY` with `storage/ledger.json`; failure to decrypt a historical response fails closed and keeps the event blocked.
