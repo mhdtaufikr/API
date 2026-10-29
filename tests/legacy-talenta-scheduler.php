@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 putenv('INTEGRATION_STORAGE=legacy_app');
 putenv('TALENTA_SCHEDULER_ENABLED=true');
+putenv('TALENTA_SCHEDULE_EMPLOYEE_BATCH_SIZE=25');
+putenv('TALENTA_SCHEDULE_ROW_BATCH_SIZE=500');
 require __DIR__ . '/../app/bootstrap.php';
 
 $checks = 0;
@@ -17,102 +19,176 @@ function legacySchedulerCheck(bool $condition, string $label): void
     echo 'PASS: ' . $label . PHP_EOL;
 }
 
-$rows = [
-    ['FdDate' => '2026-10-28', 'FcTime' => '07:30:00', 'FcCardNo' => '2120', 'FcDirection' => '1', 'FcTermNo' => '004', 'FlFlag' => 0],
-];
-$events = [
-    ['nik' => '2120', 'timestamp' => '2026-10-28T07:30:00+07:00'],
-];
-$plan = ['rows' => $rows, 'events' => $events, 'issues' => [], 'skipped' => [], 'hash' => hash('sha256', 'plan')];
-$sent = 0;
+function fakeScope(int $batch, int $employeeStart, int $employeeCount, int $recordCount): array
+{
+    $cards = [];
+    for ($index = 0; $index < $employeeCount; $index++) {
+        $cards[] = 'CARD-' . str_pad((string) ($employeeStart + $index), 4, '0', STR_PAD_LEFT);
+    }
+    return [
+        'id' => 'batch-' . $batch,
+        'from' => '2026-10-26',
+        'to' => '2026-10-29',
+        'cards' => $cards,
+        'cursor' => null,
+        'row_limit' => 500,
+        'record_count' => $recordCount,
+    ];
+}
+
+function fakePlan(array $scope, array $changes = []): array
+{
+    $rows = array_fill(0, $scope['record_count'], ['FlFlag' => 0]);
+    $events = array_fill(0, $scope['record_count'], ['timestamp' => '2026-10-28T08:00:00+07:00']);
+    return array_replace([
+        'rows' => $rows,
+        'events' => $events,
+        'issues' => [],
+        'skipped' => [],
+        'held' => [],
+        'hash' => hash('sha256', $scope['id']),
+    ], $changes);
+}
+
+// Tests 1 and 2: 250 employees / 1,250 records across deterministic bounded batches.
+$pending = [];
+for ($batch = 0; $batch < 10; $batch++) {
+    $scope = fakeScope($batch + 1, $batch * 25 + 1, 25, 125);
+    $pending[$scope['id']] = $scope;
+}
+$sent = [];
 $logs = [];
-$previewedDates = [];
 $scheduler = new LegacyTalentaScheduledExport(
-    static function (array $scope) use ($plan, &$previewedDates): array {
-        $previewedDates[] = $scope[0];
-        if ($scope[0] !== '2026-10-28') {
-            throw new NoPendingLegacyAttendanceException('none');
+    static fn(array $scope): array => fakePlan($scope),
+    static function (array $scope, string $hash) use (&$pending, &$sent): array {
+        legacySchedulerCheck($hash === hash('sha256', $scope['id']), 'Each scheduled batch reuses its reviewed hash');
+        $sent[] = $scope['id'];
+        unset($pending[$scope['id']]); // Simulates exact FlFlag updates after acceptance.
+        return ['status' => 'submitted_pending_reconciliation', 'flag_updated' => true, 'http' => 202, 'id' => 'LEDGER-' . $scope['id']];
+    },
+    static function (array $summary) use (&$logs): void { $logs[] = $summary; },
+    static function (string $from, string $to, int $employeeBatch, int $rowBatch) use (&$pending): iterable {
+        legacySchedulerCheck($employeeBatch === 25 && $rowBatch === 500, 'Configurable internal batch sizes are passed to discovery');
+        return array_values($pending);
+    }
+);
+
+$preview = $scheduler->run(true, new DateTimeImmutable('2026-10-29T13:00:00+07:00'));
+legacySchedulerCheck($preview['status'] === 'preview' && $preview['total_unique_employees'] === 250 && $preview['total_pending_records'] === 1250 && $preview['batches_created'] === 10 && $preview['events_pending'] === 1250 && !$sent, 'Preview supports 250 employees and more than 1,000 rows without truncation');
+
+$outside = $scheduler->run(false, new DateTimeImmutable('2026-10-29T13:00:00+07:00'));
+legacySchedulerCheck($outside['status'] === 'outside_schedule' && !$sent, 'No-argument scheduled mode still enforces the existing time windows');
+
+$completed = $scheduler->run(false, new DateTimeImmutable('2026-10-29T13:00:00+07:00'), true);
+legacySchedulerCheck($completed['status'] === 'completed' && $completed['batches_submitted'] === 10 && $completed['flags_updated'] === 1250 && count($sent) === 10, 'All 1,250 eligible records are processed across ten batches');
+legacySchedulerCheck(count(array_unique($sent)) === 10, 'No batch is submitted twice in one run');
+
+// Test 4: a second run sees no rows whose successful flag updates were confirmed.
+$second = $scheduler->run(false, new DateTimeImmutable('2026-10-29T13:01:00+07:00'), true);
+legacySchedulerCheck($second['status'] === 'no_pending' && $second['batches_submitted'] === 0 && count($sent) === 10, 'A subsequent run does not resubmit successfully processed records');
+
+// Test 3: one rejected API batch does not discard or prevent later independent batches.
+$partialScopes = [fakeScope(1, 1, 1, 1), fakeScope(2, 2, 1, 1), fakeScope(3, 3, 1, 1)];
+$partialAttempts = [];
+$partial = new LegacyTalentaScheduledExport(
+    static fn(array $scope): array => fakePlan($scope),
+    static function (array $scope) use (&$partialAttempts): array {
+        $partialAttempts[] = $scope['id'];
+        if ($scope['id'] === 'batch-2') {
+            return ['status' => 'rejected', 'flag_updated' => false, 'http' => 422, 'id' => 'REJECTED'];
         }
-        return $plan;
+        return ['status' => 'submitted_pending_reconciliation', 'flag_updated' => true, 'http' => 202, 'id' => 'OK-' . $scope['id']];
     },
-    static function (array $scope, string $hash) use (&$sent, $plan): array {
-        $sent++;
-        legacySchedulerCheck($hash === $plan['hash'], 'Scheduled send reuses the reviewed preview hash');
-        return ['status' => 'submitted_pending_reconciliation', 'flag_updated' => true, 'http' => 202, 'id' => 'TEST-LEDGER'];
-    },
-    static function (array $summary) use (&$logs): void {
-        $logs[] = $summary;
+    static function (array $summary): void {},
+    static fn(): iterable => $partialScopes
+);
+$partialResult = $partial->run(false, new DateTimeImmutable('2026-10-29T13:02:00+07:00'), true);
+legacySchedulerCheck($partialResult['status'] === 'partially_completed' && $partialResult['batches_submitted'] === 2 && $partialResult['batches_failed'] === 1 && $partialResult['flags_updated'] === 2 && $partialAttempts === ['batch-1', 'batch-2', 'batch-3'], 'A rejected middle batch remains unflagged while later batches continue');
+
+$discoveryFailure = new LegacyTalentaScheduledExport(
+    static fn(array $scope): array => fakePlan($scope),
+    static fn(): array => ['status' => 'submitted_pending_reconciliation', 'flag_updated' => true, 'http' => 202, 'id' => 'BEFORE-DISCOVERY-FAILURE'],
+    static function (array $summary): void {},
+    static function (): iterable {
+        yield fakeScope(1, 1, 1, 1);
+        throw new RuntimeException('Simulated cursor discovery failure');
     }
 );
+$discoveryFailureResult = $discoveryFailure->run(false, new DateTimeImmutable('2026-10-29T13:02:30+07:00'), true);
+legacySchedulerCheck($discoveryFailureResult['status'] === 'partially_completed' && $discoveryFailureResult['batches_submitted'] === 1 && $discoveryFailureResult['flags_updated'] === 1 && $discoveryFailureResult['batches_failed'] === 1 && $discoveryFailureResult['errors'] === 1, 'A discovery failure after acceptance reports partial completion without erasing successful counts');
 
-$preview = $scheduler->run(true, new DateTimeImmutable('2026-10-28T12:27:00+07:00'));
-legacySchedulerCheck($preview['status'] === 'preview' && $preview['events_pending'] === 1 && $sent === 0, 'Preview works outside a slot without sending or updating flags');
-legacySchedulerCheck($previewedDates === ['2026-10-25', '2026-10-26', '2026-10-27', '2026-10-28'], 'Lookback is partitioned into bounded daily batches');
-
-$previewedDates = [];
-$outside = $scheduler->run(false, new DateTimeImmutable('2026-10-28T12:27:00+07:00'));
-legacySchedulerCheck($outside['status'] === 'outside_schedule' && $sent === 0, 'Live scheduler refuses an out-of-window manual run');
-
-$manual = $scheduler->run(false, new DateTimeImmutable('2026-10-28T12:27:00+07:00'), true);
-legacySchedulerCheck($manual['status'] === 'completed' && $manual['trigger'] === 'manual' && $manual['slot'] === null && $sent === 1, 'Explicit manual mode sends outside a schedule window through the same guarded pipeline');
-
-$previewedDates = [];
-$completed = $scheduler->run(false, new DateTimeImmutable('2026-10-28T18:00:00+07:00'));
-legacySchedulerCheck($completed['status'] === 'completed' && $completed['batches_submitted'] === 1 && $completed['flags_updated'] === 1 && $sent === 2, 'Scheduled acceptance updates the exact legacy flag batch');
-legacySchedulerCheck(count($logs) === 3 && $logs[2]['ledger_ids'] === ['TEST-LEDGER'], 'Non-preview scheduler outcomes are audited without raw attendance payloads');
-
-$skippedPlan = $plan;
-$skippedPlan['skipped'] = [['card' => '2131', 'rows' => 2, 'reason' => 'Barcode empty']];
-$skippedScheduler = new LegacyTalentaScheduledExport(
-    static function (array $scope) use ($skippedPlan): array {
-        if ($scope[0] !== '2026-10-28') throw new NoPendingLegacyAttendanceException('none');
-        return $skippedPlan;
-    },
-    static fn(array $scope, string $hash): array => ['status' => 'submitted_pending_reconciliation', 'flag_updated' => true, 'http' => 202, 'id' => 'SKIP-LEDGER'],
-    static function (array $summary): void {}
+// Unknown transport/API outcome is held for reconciliation and never flagged.
+$uncertain = new LegacyTalentaScheduledExport(
+    static fn(array $scope): array => fakePlan($scope),
+    static fn(): array => ['status' => 'unknown', 'flag_updated' => false, 'http' => 0, 'id' => 'UNKNOWN-LEDGER'],
+    static function (array $summary): void {},
+    static fn(): iterable => [fakeScope(1, 1, 1, 1)]
 );
-$skippedResult = $skippedScheduler->run(false, new DateTimeImmutable('2026-10-28T18:00:00+07:00'));
-legacySchedulerCheck($skippedResult['status'] === 'completed_with_skips' && $skippedResult['events_skipped'] === 2 && $skippedResult['cards_skipped'] === 1 && $skippedResult['flags_updated'] === 1, 'Invalid identity rows stay skipped while valid rows are submitted and flagged');
+$uncertainResult = $uncertain->run(false, new DateTimeImmutable('2026-10-29T13:03:00+07:00'), true);
+legacySchedulerCheck($uncertainResult['status'] === 'held' && $uncertainResult['batches_held'] === 1 && $uncertainResult['flags_updated'] === 0 && $uncertainResult['errors'] === 1, 'Unknown outcomes are held without flag updates or automatic retry claims');
 
-$skipOnlyPlan = ['rows' => [], 'events' => [], 'issues' => [], 'skipped' => [['card' => '2131', 'rows' => 3, 'reason' => 'Barcode empty']], 'hash' => 'skip-only'];
-$skipOnlyScheduler = new LegacyTalentaScheduledExport(
-    static function (array $scope) use ($skipOnlyPlan): array {
-        if ($scope[0] !== '2026-10-28') throw new NoPendingLegacyAttendanceException('none');
-        return $skipOnlyPlan;
-    },
-    static function (): array { throw new LogicException('Skipped-only batch must not send.'); },
-    static function (array $summary): void {}
+// Test 5: invalid identity rows are skipped while verified rows continue.
+$identityScope = fakeScope(1, 1, 2, 10);
+$invalidIdentity = new LegacyTalentaScheduledExport(
+    static fn(array $scope): array => fakePlan($scope, [
+        'rows' => array_fill(0, 8, ['FlFlag' => 0]),
+        'events' => array_fill(0, 8, ['timestamp' => '2026-10-28T08:00:00+07:00']),
+        'skipped' => [['card' => 'INVALID-CARD', 'rows' => 2, 'reason' => 'Unverified identity']],
+    ]),
+    static fn(): array => ['status' => 'submitted_pending_reconciliation', 'flag_updated' => true, 'http' => 202, 'id' => 'IDENTITY-OK'],
+    static function (array $summary): void {},
+    static fn(): iterable => [$identityScope]
 );
-$skipOnlyResult = $skipOnlyScheduler->run(false, new DateTimeImmutable('2026-10-28T18:00:00+07:00'));
-legacySchedulerCheck($skipOnlyResult['status'] === 'completed_with_skips' && $skipOnlyResult['batches_submitted'] === 0 && $skipOnlyResult['events_skipped'] === 3 && $skipOnlyResult['flags_updated'] === 0 && $skipOnlyResult['errors'] === 0, 'A skipped-only day is a safe no-send outcome and leaves every flag unchanged');
+$identityResult = $invalidIdentity->run(false, new DateTimeImmutable('2026-10-29T13:04:00+07:00'), true);
+legacySchedulerCheck($identityResult['status'] === 'completed_with_skips' && $identityResult['records_skipped'] === 2 && $identityResult['cards_skipped'] === 1 && $identityResult['flags_updated'] === 8, 'Invalid identities are skipped without blocking verified employees');
+legacySchedulerCheck(!str_contains(json_encode($identityResult, JSON_THROW_ON_ERROR), 'INVALID-CARD'), 'Structured scheduler logs contain counts, not employee/card identifiers');
 
-$held = new LegacyTalentaScheduledExport(
-    static function (array $scope) use ($rows, $events): array {
-        if ($scope[0] !== '2026-10-28') {
-            throw new NoPendingLegacyAttendanceException('none');
-        }
-        return ['rows' => $rows, 'events' => $events, 'issues' => ['Identity held'], 'hash' => 'held'];
+$blockedSenderCalled = false;
+$blocked = new LegacyTalentaScheduledExport(
+    static fn(array $scope): array => fakePlan($scope, [
+        'rows' => [],
+        'events' => [],
+        'skipped' => [['card' => 'INVALID-CARD', 'rows' => 3, 'reason' => 'Unverified identity']],
+    ]),
+    static function () use (&$blockedSenderCalled): array {
+        $blockedSenderCalled = true;
+        throw new LogicException('Blocked-only input must not send.');
     },
-    static function (): array {
-        throw new LogicException('Held batch must not send.');
-    },
-    static function (array $summary): void {
-    }
+    static function (array $summary): void {},
+    static fn(): iterable => [fakeScope(1, 1, 1, 3)]
 );
-$heldResult = $held->run(false, new DateTimeImmutable('2026-10-28T18:00:00+07:00'));
-legacySchedulerCheck($heldResult['status'] === 'held' && $heldResult['errors'] === 1, 'Validation issues hold the whole scheduled batch before submission');
+$blockedResult = $blocked->run(false, new DateTimeImmutable('2026-10-29T13:05:00+07:00'), true);
+legacySchedulerCheck($blockedResult['status'] === 'held' && $blockedResult['errors'] === 1 && !$blockedSenderCalled, 'A run whose entire input is skipped is not reported as successful');
 
-$empty = new LegacyTalentaScheduledExport(
-    static function (): array {
-        throw new NoPendingLegacyAttendanceException('none');
-    },
-    static function (): array {
-        throw new LogicException('Empty batch must not send.');
-    },
-    static function (array $summary): void {
-    }
+$attemptedHeld = new LegacyTalentaScheduledExport(
+    static fn(array $scope): array => fakePlan($scope, [
+        'rows' => [],
+        'events' => [],
+        'held' => [['rows' => 2, 'reason' => 'Previously attempted event requires reconciliation']],
+    ]),
+    static function (): array { throw new LogicException('Ledger-held input must not send.'); },
+    static function (array $summary): void {},
+    static fn(): iterable => [fakeScope(1, 1, 1, 2)]
 );
-$emptyResult = $empty->run(false, new DateTimeImmutable('2026-10-28T18:00:00+07:00'));
-legacySchedulerCheck($emptyResult['status'] === 'no_pending' && $emptyResult['errors'] === 0, 'No pending legacy rows is a successful no-op');
+$attemptedHeldResult = $attemptedHeld->run(false, new DateTimeImmutable('2026-10-29T13:06:00+07:00'), true);
+legacySchedulerCheck($attemptedHeldResult['status'] === 'held' && $attemptedHeldResult['records_held'] === 2 && $attemptedHeldResult['flags_updated'] === 0, 'Previously attempted events remain held without resend or flag update');
 
-echo $checks . " legacy scheduler checks passed. Fake dispatcher only; no database, FlFlag or Talenta request.\n";
+// Test 7: interactive/manual preview retains its original employee safety limit.
+$interactiveRows = [];
+for ($employee = 1; $employee <= 101; $employee++) {
+    $interactiveRows[] = ['FcCardNo' => 'CARD-' . $employee];
+}
+try {
+    LegacyManualSend::assertInteractiveEmployeeLimit($interactiveRows);
+    throw new LogicException('Interactive limit was removed.');
+} catch (RuntimeException $error) {
+    legacySchedulerCheck(!($error instanceof LogicException) && str_contains($error->getMessage(), '100 karyawan'), 'Interactive preview still rejects more than 100 employees');
+}
+
+// Test 6: the existing BAT/PowerShell/console chain remains intact.
+$bat = file_get_contents(ROOT . '/kirimkeTalenta.bat');
+$runner = file_get_contents(ROOT . '/bin/run-talenta.ps1');
+$console = file_get_contents(ROOT . '/bin/console.php');
+legacySchedulerCheck(str_contains($bat, 'bin\run-talenta.ps1') && str_contains($runner, "'talenta:scheduler'") && str_contains($console, "command === 'talenta:scheduler'"), 'Windows Task Scheduler entrypoint remains BAT to PowerShell to console scheduler');
+
+echo $checks . " legacy scheduler batch checks passed. Fake dispatcher only; no database, FlFlag or Talenta request.\n";

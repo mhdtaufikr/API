@@ -28,11 +28,11 @@ The existing integration queue and file ledger protect each individual raw event
 
 Code, scheduler preview, Windows task installer and cron example are prepared. **Automatic submission remains disabled** with `TALENTA_SCHEDULER_ENABLED=false` until explicitly enabled in the deployed environment.
 
-When `INTEGRATION_STORAGE=legacy_app`, the same `talenta:scheduler` command now uses the legacy dispatcher instead of generated integration tables. It partitions the configured lookback into bounded daily batches, selects `tbl_rawdata` rows with `FlFlag=0`, validates every distinct card against Talenta, builds each verified Attendance MKM CSV in memory/temporary multipart storage, uses the existing ledger to block repeated attempts, and updates the exact source tuples to `FlFlag=1` only after HTTP acceptance. Ambiguous identical tuples, invalid identities, profile mismatches, rejected/unknown outcomes and flag-update failures remain held for reconciliation.
+When `INTEGRATION_STORAGE=legacy_app`, the same `talenta:scheduler` command now uses the legacy dispatcher instead of generated integration tables. It scans pending cards and immutable source tuples with deterministic keyset cursors, not OFFSET, so successful `FlFlag` changes cannot create pagination gaps. `TALENTA_SCHEDULE_EMPLOYEE_BATCH_SIZE` (default 25) bounds identity resolution work and `TALENTA_SCHEDULE_ROW_BATCH_SIZE` (default 500) bounds each CSV/row page; these are internal resource controls, not assumed Talenta API limits. Interactive preview retains its 100-employee/1,000-row safeguards. Each scheduled batch is previewed and hash-checked immediately before submission, and only its exact accepted tuples become `FlFlag=1`.
 
 The reviewed Attendance MKM contract is packaged without credentials so a clean Git deployment can pass the contract gate. A deployment may still provide the older private `config/contract.json` plus matching `storage/postman.json`; both runtime files must exist together and retain their reviewed hash. Partial or changed runtime evidence remains blocked.
 
-Scheduled legacy batches skip only identities that Talenta confirms are unusable for fingerprint import, such as a missing/mismatched barcode, invalid user ID or a non-unique employee result. Skipped source rows remain `FlFlag=0`, are excluded from the CSV and are counted in `events_skipped`/`cards_skipped`; valid employees in the same day continue independently. Transport failures, credential errors, profile errors, ambiguous source tuples and unknown outcomes still hold the batch. Manual sending remains strict and does not skip an invalid selected identity.
+Scheduled legacy batches skip only identities that Talenta confirms are unusable for fingerprint import, such as a missing/mismatched barcode, invalid user ID or a non-unique employee result. Skipped source rows remain `FlFlag=0`, are excluded from the CSV and are counted in `records_skipped`/`cards_skipped`; valid employees continue independently. Ambiguous tuples and previously attempted events are held without retry. Rejected batches are failed, transport/unknown outcomes are held for reconciliation, and later independent batches continue. Manual interactive sending remains strict and does not skip an invalid selected identity.
 
 `kirimkeTalenta.bat --manual` explicitly runs the same legacy scheduler pipeline outside the 08:00/12:00/18:00 windows. It does not weaken the enabled/live-write/credential/profile gates, preview revalidation, identity skips, ledger protection or exact post-acceptance flag update. The no-argument BAT remains schedule-window-only; `--preview` remains read-only.
 
@@ -41,7 +41,7 @@ No new database migration is needed; scheduled batches use the existing integrat
 ## Review and activation
 
 1. Configure and verify the real test NIK, all card/employee/user/badge mappings, device directions, shift/calendar/grace policies and the actual Talenta CSV profile. Minute-resolution CSV profiles cannot silently discard machine seconds.
-2. Confirm CLI runtime PHP 8.2+, trusted CA/proxy/network access and company scope. Apache GET reads succeeded previously while agent CLI network checks timed out; this is not proof that a Windows Task Scheduler service account can reach Mekari. Test the actual deployment account/runtime with `php bin/check-talenta-read.php` before activating writes.
+2. Confirm the supported CLI runtime (PHP 7.4+), trusted CA/proxy/network access and company scope. Apache GET reads succeeded previously while agent CLI network checks timed out; this is not proof that a Windows Task Scheduler service account can reach Mekari. Test the actual deployment account/runtime with `php bin/check-talenta-read.php` before activating writes.
 3. Review candidates without writes:
 
 ```powershell
@@ -92,6 +92,8 @@ The resulting task is **disabled**. Review its service account, PHP path, networ
 - `storage/scheduler-state.json`: attempted-slot reservations. Do not delete to force a retry.
 - `storage/scheduler-approval.json`: signed profile fingerprint, no secret values.
 - Existing database queue and `storage/ledger.json`: event reservations and API result metadata.
+
+The 29 October production batching deployment, rollback and 28 October pending-row recovery runbook is in `docs/PRODUCTION_BATCH_SCHEDULER_2026-10-29.md`.
 
 If a process stops after reservation or an API outcome is uncertain, inspect and reconcile with Talenta before any manual retry. Do not clear unknown events automatically. Source raw events are never deleted by the scheduler.
 

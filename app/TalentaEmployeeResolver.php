@@ -13,7 +13,7 @@ final class TalentaEmployeeResolver {
     }
     public static function resolve(string $card): array {
         if(!extension_loaded('curl')||env('MEKARI_BASE_URL')!=='https://api.mekari.com')throw new RuntimeException('cURL/API host Mekari belum sesuai konfigurasi.');
-        if($card===''||strlen($card)>50)throw new RuntimeException('Nomor kartu kosong/tidak valid.');
+        if($card===''||strlen($card)>50)throw new UnsendableTalentaIdentityException('Nomor kartu kosong/tidak valid.');
         $path=ROOT.'/storage/employee-identity-cache.json';$context=hash('sha256',env('MEKARI_COMPANY_ID').'|'.IntegrationSettings::fingerprint());$cache=is_file($path)?jsonFile($path):[];
         $saved=$cache[$context][$card]??null;if($saved&&$saved['expires']>time())return $saved['mapping'];
         $id=env('MEKARI_CLIENT_ID');$secret=env('MEKARI_CLIENT_SECRET');if($id===''||$secret===''||preg_match('/[\x00-\x1f\x7f"]/',$id.$secret))throw new RuntimeException('Kredensial Mekari belum valid.');

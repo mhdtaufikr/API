@@ -6,6 +6,7 @@ final class LegacyAttendanceRepository implements ReceiverEventStore
 {
     private PDO $pdo;
     public const FIELDS = ['FdDate', 'FcTime', 'FcCardNo', 'FcDirection', 'FcTermNo', 'FlFlag'];
+    private const SCHEDULE_ORDER = ['FdDate', 'FcTime', 'FcCardNo', 'FcTermNo', 'FcDirection'];
     public function __construct(PDO $pdo)
     {
         $this->pdo = $pdo;
@@ -61,6 +62,149 @@ final class LegacyAttendanceRepository implements ReceiverEventStore
             $row['identity_ambiguous'] = $row['identical_rows'] > 1;
         }
         return $rows;
+    }
+
+    /**
+     * Deterministic scheduler scopes use keyset cursors. OFFSET is deliberately
+     * avoided because successful batches change FlFlag while a run is active.
+     */
+    public function scheduledScopes(string $from, string $to, int $employeeBatchSize, int $rowBatchSize): Generator
+    {
+        AttendanceRepository::dateRange($from, $to);
+        if ($employeeBatchSize < 1 || $employeeBatchSize > 100 || $rowBatchSize < 1 || $rowBatchSize > 1000) {
+            compat_throw(new InvalidArgumentException('Invalid scheduled employee/row batch size.'));
+        }
+        $this->inspect();
+        $afterCard = null;
+        while (true) {
+            $cards = $this->pendingCardPage($from, $to, $afterCard, $employeeBatchSize);
+            if (!$cards) {
+                return;
+            }
+            $cursor = null;
+            while (true) {
+                $page = $this->scheduledRowsPage($from, $to, $cards, $cursor, $rowBatchSize);
+                if (!$page['rows']) {
+                    break;
+                }
+                yield [
+                    'from' => $from,
+                    'to' => $to,
+                    'cards' => $cards,
+                    'cursor' => $cursor,
+                    'row_limit' => $rowBatchSize,
+                    'record_count' => $page['record_count'],
+                ];
+                if (!$page['has_more']) {
+                    break;
+                }
+                $cursor = $page['next_cursor'];
+            }
+            $afterCard = (string) end($cards);
+            if (count($cards) < $employeeBatchSize) {
+                return;
+            }
+        }
+    }
+
+    /** @return string[] */
+    private function pendingCardPage(string $from, string $to, ?string $afterCard, int $limit): array
+    {
+        $q = [Database::class, 'quote'];
+        $card = $q('FcCardNo');
+        $cardKey = Database::driver() === 'mysql'
+            ? 'COALESCE(CAST(' . $card . ' AS CHAR),\'\')'
+            : 'COALESCE(' . $card . '::text,\'\')';
+        $sql = 'SELECT DISTINCT ' . $cardKey . ' AS card_key FROM ' . $this->table()
+            . ' WHERE ' . $q('FdDate') . ' >= :start AND ' . $q('FdDate') . ' <= :end'
+            . ' AND ' . $q('FlFlag') . '=0';
+        $params = ['start' => $from, 'end' => $to];
+        if ($afterCard !== null) {
+            $sql .= ' AND ' . $cardKey . ' > :after_card';
+            $params['after_card'] = $afterCard;
+        }
+        $sql .= ' ORDER BY card_key ASC LIMIT ' . $limit;
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        return array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Returns grouped immutable tuples. identical_rows > 1 is retained as an
+     * ambiguity and never submitted or flagged automatically.
+     */
+    public function scheduledRowsPage(string $from, string $to, array $cards, ?array $cursor, int $limit): array
+    {
+        AttendanceRepository::dateRange($from, $to);
+        if (!$cards || count($cards) > 100 || $limit < 1 || $limit > 1000) {
+            compat_throw(new InvalidArgumentException('Invalid scheduled row page.'));
+        }
+        foreach ($cards as $card) {
+            if (!is_string($card) || strlen($card) > 50) {
+                compat_throw(new InvalidArgumentException('Invalid scheduled card value.'));
+            }
+        }
+        if ($cursor !== null && count($cursor) !== count(self::SCHEDULE_ORDER)) {
+            compat_throw(new InvalidArgumentException('Invalid scheduled cursor.'));
+        }
+
+        $q = [Database::class, 'quote'];
+        $fields = implode(',', array_map($q, self::FIELDS));
+        $holders = [];
+        $params = ['start' => $from, 'end' => $to];
+        foreach (array_values($cards) as $index => $card) {
+            $holder = 'card_' . $index;
+            $holders[] = ':' . $holder;
+            $params[$holder] = $card;
+        }
+        $orderExpressions = array_map(function (string $field) use ($q): string {
+            $quoted = $q($field);
+            return Database::driver() === 'mysql'
+                ? 'COALESCE(CAST(' . $quoted . ' AS CHAR),\'\')'
+                : 'COALESCE(' . $quoted . '::text,\'\')';
+        }, self::SCHEDULE_ORDER);
+
+        $cardExpression = $orderExpressions[2];
+        $sql = 'SELECT ' . $fields . ',COUNT(*) AS identical_rows FROM ' . $this->table()
+            . ' WHERE ' . $q('FdDate') . ' >= :start AND ' . $q('FdDate') . ' <= :end'
+            . ' AND ' . $q('FlFlag') . '=0 AND ' . $cardExpression . ' IN (' . implode(',', $holders) . ')';
+        if ($cursor !== null) {
+            $cursorHolders = [];
+            foreach (array_values($cursor) as $index => $value) {
+                $holder = 'cursor_' . $index;
+                $cursorHolders[] = ':' . $holder;
+                $params[$holder] = (string) $value;
+            }
+            $sql .= ' AND (' . implode(',', $orderExpressions) . ') > (' . implode(',', $cursorHolders) . ')';
+        }
+        $sql .= ' GROUP BY ' . $fields
+            . ' ORDER BY ' . implode(' ASC,', $orderExpressions) . ' ASC LIMIT ' . ($limit + 1);
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $hasMore = count($rows) > $limit;
+        if ($hasMore) {
+            $rows = array_slice($rows, 0, $limit);
+        }
+        $recordCount = 0;
+        foreach ($rows as &$row) {
+            $row['identical_rows'] = (int) $row['identical_rows'];
+            $row['identity_ambiguous'] = $row['identical_rows'] > 1;
+            $row['value_group_hash'] = self::fingerprint($row);
+            $recordCount += $row['identical_rows'];
+        }
+        unset($row);
+        $nextCursor = null;
+        if ($rows) {
+            $last = $rows[array_key_last($rows)];
+            $nextCursor = array_map(fn(string $field): string => (string) ($last[$field] ?? ''), self::SCHEDULE_ORDER);
+        }
+        return [
+            'rows' => $rows,
+            'record_count' => $recordCount,
+            'has_more' => $hasMore,
+            'next_cursor' => $nextCursor,
+        ];
     }
     public static function fingerprint(array $row): string
     {

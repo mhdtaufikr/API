@@ -108,6 +108,19 @@ final class Mekari
             fclose($f);
         }
     }
+    /** @return array<string,bool> */
+    public static function attemptedEventKeySet(?array $ledger = null): array
+    {
+        $attempted = [];
+        foreach ($ledger ?? self::logs() as $entry) {
+            foreach ($entry['event_keys'] ?? [] as $key) {
+                if (is_string($key) && preg_match('/\A[a-f0-9]{64}\z/', $key)) {
+                    $attempted[$key] = true;
+                }
+            }
+        }
+        return $attempted;
+    }
     private static function writeLedger($f, array $ledger): void
     {
         $json = json_encode($ledger, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
@@ -145,6 +158,22 @@ final class Mekari
             }
         }
         return $safe;
+    }
+    public static function submissionStatus($response, int $httpCode): string
+    {
+        if (!is_string($response)) {
+            return 'unknown';
+        }
+        if ($httpCode < 200 || $httpCode >= 300) {
+            return 'rejected';
+        }
+        $decoded = json_decode($response, true);
+        if (is_array($decoded) && (($decoded['success'] ?? null) === false
+            || in_array(strtolower((string) ($decoded['status'] ?? '')), ['error', 'failed', 'failure'], true)
+            || !empty($decoded['errors']))) {
+            return 'rejected';
+        }
+        return 'submitted_pending_reconciliation';
     }
     public static function multipartCsv(string $csv, ?string &$temporary)
     {
@@ -216,13 +245,7 @@ final class Mekari
             curl_close($curl);
             $entry['http'] = $code;
             $entry['reference'] = is_string($response) ? self::responseReference($response) : [];
-            $entry['status'] = $response === false ? 'unknown' : ($code >= 200 && $code < 300 ? 'submitted_pending_reconciliation' : 'rejected');
-            if (is_string($response)) {
-                $decoded = json_decode($response, true);
-                if (is_array($decoded) && (($decoded['success'] ?? null) === false || in_array(strtolower((string) ($decoded['status'] ?? '')), ['error', 'failed', 'failure'], true) || !empty($decoded['errors']))) {
-                    $entry['status'] = 'rejected';
-                }
-            }
+            $entry['status'] = self::submissionStatus($response, $code);
             // Preserve diagnostics encrypted, never expose arbitrary remote text/credential echoes.
             if ($reviewedLegacy && is_string($response) && strlen($response) <= 4 * 1024 * 1024) {
                 try {
