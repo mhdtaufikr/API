@@ -225,5 +225,6 @@ $bat = file_get_contents(ROOT . '/kirimkeTalenta.bat');
 $runner = file_get_contents(ROOT . '/bin/run-talenta.ps1');
 $console = file_get_contents(ROOT . '/bin/console.php');
 legacySchedulerCheck(str_contains($bat, 'bin\run-talenta.ps1') && str_contains($runner, "'talenta:scheduler'") && str_contains($console, "command === 'talenta:scheduler'"), 'Windows Task Scheduler entrypoint remains BAT to PowerShell to console scheduler');
+legacySchedulerCheck(str_contains($runner, "@('C:\\xampp\\php\\php.exe', \$fromPath, 'C:\\php\\php.exe')"), 'Talenta launcher prefers the verified XAMPP PHP before an unrelated PATH runtime');
 
 echo $checks . " legacy scheduler batch checks passed. Fake dispatcher only; no database, FlFlag or Talenta request.\n";

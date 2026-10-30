@@ -11,7 +11,10 @@ try {
         $candidates = @($env:MKM_TALENTA_PHP_EXE)
     } else {
         $fromPath = Get-Command php.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source
-        $candidates = @($fromPath, 'C:\php\php.exe', 'C:\xampp\php\php.exe') | Where-Object { $_ } | Select-Object -Unique
+        # Prefer the production XAMPP runtime whose network/CA path is verified.
+        # PATH remains a fallback so an unrelated developer PHP cannot silently
+        # replace the runtime used by Task Scheduler or an operator shell.
+        $candidates = @('C:\xampp\php\php.exe', $fromPath, 'C:\php\php.exe') | Where-Object { $_ } | Select-Object -Unique
     }
     foreach ($candidate in $candidates) {
         if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }

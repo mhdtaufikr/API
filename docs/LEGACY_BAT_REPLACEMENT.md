@@ -6,7 +6,7 @@ The inspected legacy BAT contains:
 php -f "C:\xampp\htdocs\API\save2csv.php"
 ```
 
-The new project includes **kirimkeTalenta.bat** at its root. When deployed at the same path already used by Task Scheduler, the existing action can continue pointing to that filename. The BAT now calls `bin/run-talenta.ps1`, which selects PHP 8.2+ and runs the native `talenta:scheduler` command.
+The new project includes **kirimkeTalenta.bat** at its root. When deployed at the same path already used by Task Scheduler, the existing action can continue pointing to that filename. The BAT now calls `bin/run-talenta.ps1`, which selects PHP 7.4+ and runs the native `talenta:scheduler` command.
 
 ```text
 Existing Task Scheduler action
@@ -14,7 +14,7 @@ Existing Task Scheduler action
                    ↓
              bin\run-talenta.ps1
                    ↓
-   PHP 8.2+ bin\console.php talenta:scheduler
+   PHP 7.4+ bin\console.php talenta:scheduler
                    ↓
    approved event batches at 08:00 / 12:00 / 18:00 WIB
 ```
@@ -26,8 +26,8 @@ No existing production BAT, scheduler action, protected supplier PHP, receiver o
 - Keep the same BAT filename and absolute path in the existing Task Scheduler action. Existing 08:00/12:00/18:00 triggers can remain. If the actual task uses another command directly, inspect that action before replacing files; this wrapper does not silently rewrite task configuration.
 - Deploy the complete new application and its private configuration/storage beside the BAT. Copying the BAT alone without `bin`, `app`, configuration and migrations is not sufficient.
 - The wrapper locates the project relative to its own path, so Task Scheduler's working directory does not have to be changed.
-- Runtime selection: an explicit `MKM_TALENTA_PHP_EXE` environment variable, otherwise supported PHP on PATH, then the verified local candidates `C:\php\php.exe` and `C:\xampp\php\php.exe`. PHP below 8.2 is rejected; no existing global PHP installation is upgraded or modified.
-- For production, point `MKM_TALENTA_PHP_EXE` to the intended PHP 8.2+ runtime in the scheduled account environment. Verify that account's database/network/CA permissions separately.
+- Runtime selection: an explicit `MKM_TALENTA_PHP_EXE` environment variable, otherwise the verified production candidate `C:\xampp\php\php.exe`, then supported PHP on PATH and `C:\php\php.exe`. PHP below 7.4 is rejected; no existing global PHP installation is upgraded or modified.
+- The production XAMPP runtime is preferred because its Mekari network/CA path was verified. `MKM_TALENTA_PHP_EXE` remains the explicit override for a separately validated runtime. Verify the scheduled account's database/network/CA permissions before changing it.
 - Existing source data/mapping/profile verification, `TALENTA_SCHEDULER_ENABLED`, signed approval and live-write gates still apply. The wrapper does not enable export or reset any safety flags.
 - Overlapping/duplicate invocations are handled by the scheduler and event-level reservations. Import outcomes still require reconciliation; Task Scheduler Last Run Result 0 alone is not proof that Talenta imported attendance.
 
