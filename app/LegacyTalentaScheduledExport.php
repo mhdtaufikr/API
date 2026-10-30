@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 final class LegacyTalentaScheduledExport
 {
+    public const DEFAULT_EMPLOYEE_BATCH_SIZE = 100;
+
     /** @var callable */
     private $previewer;
     /** @var callable */
@@ -40,7 +42,7 @@ final class LegacyTalentaScheduledExport
         $now = ($now ?? new DateTimeImmutable('now'))->setTimezone(new DateTimeZone('Asia/Jakarta'));
         $window = filter_var(env('TALENTA_SCHEDULE_WINDOW_MINUTES', '15'), FILTER_VALIDATE_INT);
         $days = filter_var(env('TALENTA_SCHEDULE_LOOKBACK_DAYS', '3'), FILTER_VALIDATE_INT);
-        $employeeBatch = filter_var(env('TALENTA_SCHEDULE_EMPLOYEE_BATCH_SIZE', '25'), FILTER_VALIDATE_INT);
+        $employeeBatch = filter_var(env('TALENTA_SCHEDULE_EMPLOYEE_BATCH_SIZE', (string) self::DEFAULT_EMPLOYEE_BATCH_SIZE), FILTER_VALIDATE_INT);
         $rowBatch = filter_var(env('TALENTA_SCHEDULE_ROW_BATCH_SIZE', '500'), FILTER_VALIDATE_INT);
         $maxSubmissions = filter_var(env('TALENTA_SCHEDULE_MAX_SUBMISSIONS', '4'), FILTER_VALIDATE_INT);
         if ($window === false || $window < 1 || $window > 59

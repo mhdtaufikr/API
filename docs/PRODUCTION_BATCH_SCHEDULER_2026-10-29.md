@@ -9,7 +9,7 @@ The legacy scheduler reused the interactive preview path. A full day was loaded 
 - Interactive/manual web preview keeps the 100-employee and 1,000-row limits.
 - The scheduled and explicit `--manual` scheduler paths discover `FlFlag=0` cards in deterministic card pages and immutable tuple pages.
 - Keyset cursors are used instead of OFFSET. Updating successful rows to `FlFlag=1` cannot shift later records out of the scan.
-- Default internal resource bounds are 25 employees and 500 tuple groups per batch. They are configurable with `TALENTA_SCHEDULE_EMPLOYEE_BATCH_SIZE` and `TALENTA_SCHEDULE_ROW_BATCH_SIZE`; they are not claims about Talenta API limits.
+- Default internal resource bounds are 100 employees and 500 tuple groups per batch. The larger employee page consolidates a normal production workforce into fewer import requests while preserving the four-request Talenta queue guard. They are configurable with `TALENTA_SCHEDULE_EMPLOYEE_BATCH_SIZE` and `TALENTA_SCHEDULE_ROW_BATCH_SIZE`; they are not claims about Talenta API limits.
 - Identity cache entries are reused. A 60-second identity budget still holds the current batch; identities already validated before the hold remain cached, so a later run resumes safely.
 - Invalid/unverified Talenta identities are excluded and remain `FlFlag=0`. Ambiguous identical source tuples and ledger-attempted events are held for reconciliation.
 - Every send is re-previewed and hash-checked. The durable ledger reservation still occurs before the network request.

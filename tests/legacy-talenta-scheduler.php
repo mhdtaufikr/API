@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 putenv('INTEGRATION_STORAGE=legacy_app');
 putenv('TALENTA_SCHEDULER_ENABLED=true');
-putenv('TALENTA_SCHEDULE_EMPLOYEE_BATCH_SIZE=25');
+putenv('TALENTA_SCHEDULE_EMPLOYEE_BATCH_SIZE=100');
 putenv('TALENTA_SCHEDULE_ROW_BATCH_SIZE=500');
 putenv('TALENTA_SCHEDULE_MAX_SUBMISSIONS=4');
 require __DIR__ . '/../app/bootstrap.php';
@@ -19,6 +19,8 @@ function legacySchedulerCheck(bool $condition, string $label): void
     $checks++;
     echo 'PASS: ' . $label . PHP_EOL;
 }
+
+legacySchedulerCheck(LegacyTalentaScheduledExport::DEFAULT_EMPLOYEE_BATCH_SIZE === 100, 'Default scheduler employee batch covers a normal production workforce');
 
 function fakeScope(int $batch, int $employeeStart, int $employeeCount, int $recordCount): array
 {
@@ -69,7 +71,7 @@ $scheduler = new LegacyTalentaScheduledExport(
     },
     static function (array $summary) use (&$logs): void { $logs[] = $summary; },
     static function (string $from, string $to, int $employeeBatch, int $rowBatch) use (&$pending): iterable {
-        legacySchedulerCheck($employeeBatch === 25 && $rowBatch === 500, 'Configurable internal batch sizes are passed to discovery');
+        legacySchedulerCheck($employeeBatch === 100 && $rowBatch === 500, 'Production-sized employee batches are passed to discovery');
         return array_values($pending);
     }
 );
