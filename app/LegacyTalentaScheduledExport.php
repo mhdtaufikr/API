@@ -242,8 +242,8 @@ final class LegacyTalentaScheduledExport
 
     private static function holdReason(string $message): string
     {
-        if (preg_match('/Validasi kartu .* gagal \(HTTP ([0-9]{1,3})\)/', $message, $match)) {
-            return 'identity_validation_http_' . $match[1];
+        if (preg_match('/Validasi kartu .* gagal \(HTTP ([0-9]{1,3})(?:, cURL ([0-9]{1,3}))?\)/', $message, $match)) {
+            return 'identity_validation_http_' . $match[1] . (isset($match[2]) ? '_curl_' . $match[2] : '');
         }
         if (str_contains($message, 'Validasi identitas belum selesai')) {
             return 'identity_validation_budget';

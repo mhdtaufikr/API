@@ -99,7 +99,7 @@ If a process stops after reservation or an API outcome is uncertain, inspect and
 
 `batches_deferred` and `dispatch_stopped` distinguish Talenta queue backpressure from payload rejection. An exact concurrency deferral is safe to resume at the next scheduled or explicitly authorized manual run; arbitrary HTTP 400 responses remain permanently blocked until human reconciliation.
 
-`hold_reasons` reports stable diagnostic categories and counts for batches stopped before import, such as `identity_validation_http_429`, `identity_validation_budget`, `identity_cache_unavailable`, or `live_write_gates_not_ready`. It never includes card numbers, employee identifiers, remote payloads, or credentials.
+`hold_reasons` reports stable diagnostic categories and counts for batches stopped before import, such as `identity_validation_http_0_curl_28`, `identity_validation_budget`, `identity_cache_unavailable`, or `live_write_gates_not_ready`. It never includes card numbers, employee identifiers, remote payloads, or credentials. Identity lookup retries once after 250 ms only for transport-level DNS/connect/timeout/TLS-session/empty-reply/receive failures; certificate errors and HTTP responses are never retried automatically.
 
 ## Validation
 

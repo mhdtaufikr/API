@@ -197,15 +197,16 @@ $diagnostic = new LegacyTalentaScheduledExport(
     static fn(): array => fakePlan(fakeScope(1, 1, 1, 1), [
         'rows' => [],
         'events' => [],
-        'issues' => ['Validasi kartu ' . $diagnosticCard . ' gagal (HTTP 429). Belum ada import dikirim.'],
+        'issues' => ['Validasi kartu ' . $diagnosticCard . ' gagal (HTTP 0, cURL 28). Belum ada import dikirim.'],
     ]),
     static function (): array { throw new LogicException('Held preview must not send.'); },
     static function (array $summary): void {},
     static fn(): iterable => [fakeScope(1, 1, 1, 1)]
 );
 $diagnosticResult = $diagnostic->run(true, new DateTimeImmutable('2026-10-29T13:07:00+07:00'));
-legacySchedulerCheck(($diagnosticResult['hold_reasons']['identity_validation_http_429'] ?? 0) === 1, 'Held preview reports a stable diagnostic category');
+legacySchedulerCheck(($diagnosticResult['hold_reasons']['identity_validation_http_0_curl_28'] ?? 0) === 1, 'Held preview reports HTTP and cURL diagnostic categories');
 legacySchedulerCheck(!str_contains(json_encode($diagnosticResult, JSON_THROW_ON_ERROR), $diagnosticCard), 'Held diagnostic summary never exposes the card identifier');
+legacySchedulerCheck(TalentaEmployeeResolver::retryableCurlError(28) && !TalentaEmployeeResolver::retryableCurlError(60), 'Only transient transport failures are eligible for one identity retry');
 
 // Test 7: interactive/manual preview retains its original employee safety limit.
 $interactiveRows = [];
