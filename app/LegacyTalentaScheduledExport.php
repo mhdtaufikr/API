@@ -78,6 +78,7 @@ final class LegacyTalentaScheduledExport
             'events_pending' => 0,
             'events_skipped' => 0,
             'cards_skipped' => 0,
+            'hold_reasons' => [],
             'errors' => 0,
             'dispatch_stopped' => false,
         ];
@@ -117,8 +118,9 @@ final class LegacyTalentaScheduledExport
                     $plan = ($this->previewer)($scope);
                 } catch (NoPendingLegacyAttendanceException $_changed) {
                     continue;
-                } catch (Throwable $_previewError) {
+                } catch (Throwable $previewError) {
                     $heldBatches[$batchKey] = true;
+                    self::addHoldReason($summary, $previewError->getMessage());
                     if (!$preview) {
                         $summary['errors']++;
                     }
@@ -142,6 +144,9 @@ final class LegacyTalentaScheduledExport
                 }
                 if (!empty($plan['issues'])) {
                     $heldBatches[$batchKey] = true;
+                    foreach ($plan['issues'] as $issue) {
+                        self::addHoldReason($summary, (string) $issue);
+                    }
                     if (!$preview) {
                         $summary['errors']++;
                     }
@@ -227,6 +232,41 @@ final class LegacyTalentaScheduledExport
                 fclose($lock);
             }
         }
+    }
+
+    private static function addHoldReason(array &$summary, string $message): void
+    {
+        $reason = self::holdReason($message);
+        $summary['hold_reasons'][$reason] = ($summary['hold_reasons'][$reason] ?? 0) + 1;
+    }
+
+    private static function holdReason(string $message): string
+    {
+        if (preg_match('/Validasi kartu .* gagal \(HTTP ([0-9]{1,3})\)/', $message, $match)) {
+            return 'identity_validation_http_' . $match[1];
+        }
+        if (str_contains($message, 'Validasi identitas belum selesai')) {
+            return 'identity_validation_budget';
+        }
+        if (str_contains($message, 'Cache identitas tidak tersedia')) {
+            return 'identity_cache_unavailable';
+        }
+        if (str_contains($message, 'Kredensial Mekari belum valid')) {
+            return 'mekari_credentials_invalid';
+        }
+        if (str_contains($message, 'cURL/API host Mekari belum sesuai')) {
+            return 'mekari_runtime_invalid';
+        }
+        if (str_contains($message, 'Pengiriman belum diaktifkan')) {
+            return 'live_write_gates_not_ready';
+        }
+        if (str_contains($message, 'Profil CSV')) {
+            return 'csv_profile_invalid';
+        }
+        if (str_contains($message, 'Invalid scheduled scope')) {
+            return 'scheduled_scope_invalid';
+        }
+        return 'batch_preview_error';
     }
 
     private function finalStatus(array $summary): array
